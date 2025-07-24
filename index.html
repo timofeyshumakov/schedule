@@ -1,0 +1,459 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Планирование заказов</title>
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.x/css/materialdesignicons.min.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <v-app>
+            <v-app-bar app color="primary" dark>
+                <v-toolbar-title>Планирование заказов</v-toolbar-title>
+            </v-app-bar>
+            <v-main>
+                <div class="wrapper">
+                    <v-row>
+                        <v-col cols="12" md="4">
+                            <v-card>
+                                <v-card-title>Добавить сотрудника</v-card-title>
+                                <v-card-text>
+                                    <v-text-field v-model="newEmployee.name" label="Имя сотрудника"></v-text-field>
+                                    <v-btn color="primary" @click="addEmployee">Добавить</v-btn>
+                                </v-card-text>
+                            </v-card>
+                            <v-card class="mt-4">
+                                <v-card-title>Управление графиком</v-card-title>
+                                <v-card-text>
+                                    <v-select 
+                                        v-model="selectedEmployee" 
+                                        :items="employees" 
+                                        label="Сотрудник" 
+                                        item-text="name" 
+                                        return-object
+                                        :menu-props="{ closeOnContentClick: true }"
+                                    ></v-select>
+                                    <v-select 
+                                        v-model="scheduleAction" 
+                                        :items="scheduleActions" 
+                                        label="Действие"
+                                        :menu-props="{ closeOnContentClick: true }"
+                                    ></v-select>
+                                    <v-menu 
+                                        v-model="dateMenu1" 
+                                        :close-on-content-click="false" 
+                                        max-width="290"
+                                        :locale="ruLocale"
+                                    >
+                                        <template v-slot:activator="{ on }">
+                                            <v-text-field 
+                                                v-model="scheduleDateStart" 
+                                                label="Дата с" 
+                                                readonly 
+                                                v-on="on"
+                                                prepend-icon="mdi-calendar"
+                                            ></v-text-field>
+                                        </template>
+                                        <v-date-picker 
+                                            v-model="scheduleDateStart" 
+                                            @input="dateMenu1 = false"
+                                            :locale="ruLocale"
+                                            :first-day-of-week="1"
+                                        ></v-date-picker>
+                                    </v-menu>
+                                    <v-menu 
+                                        v-model="dateMenu2" 
+                                        :close-on-content-click="false" 
+                                        max-width="290"
+                                        :locale="ruLocale"
+                                    >
+                                        <template v-slot:activator="{ on }">
+                                            <v-text-field 
+                                                v-model="scheduleDateEnd" 
+                                                label="Дата по" 
+                                                readonly 
+                                                v-on="on"
+                                                prepend-icon="mdi-calendar"
+                                            ></v-text-field>
+                                        </template>
+                                        <v-date-picker 
+                                            v-model="scheduleDateEnd" 
+                                            @input="dateMenu2 = false"
+                                            :locale="ruLocale"
+                                            :first-day-of-week="1"
+                                        ></v-date-picker>
+                                    </v-menu>
+                                    <v-btn color="primary" @click="applySchedule">Применить</v-btn>
+                                </v-card-text>
+                            </v-card>
+                            <v-card class="mt-4">
+                                <v-card-title>Новая сделка</v-card-title>
+                                <v-card-text>
+                                    <v-text-field 
+                                        v-model.number="newDeal.manDays" 
+                                        type="number" 
+                                        label="Человеко-дни"
+                                        min="1"
+                                    ></v-text-field>
+                                    <v-menu 
+                                        v-model="dealDateMenu1" 
+                                        :close-on-content-click="false" 
+                                        max-width="290"
+                                        :locale="ruLocale"
+                                    >
+                                        <template v-slot:activator="{ on }">
+                                            <v-text-field 
+                                                v-model="newDeal.startDate" 
+                                                label="Дата с" 
+                                                readonly 
+                                                v-on="on"
+                                                prepend-icon="mdi-calendar"
+                                            ></v-text-field>
+                                        </template>
+                                        <v-date-picker 
+                                            v-model="newDeal.startDate" 
+                                            @input="dealDateMenu1 = false"
+                                            :locale="ruLocale"
+                                            :first-day-of-week="1"
+                                        ></v-date-picker>
+                                    </v-menu>
+                                    <v-menu 
+                                        v-model="dealDateMenu2" 
+                                        :close-on-content-click="false" 
+                                        max-width="290"
+                                        :locale="ruLocale"
+                                    >
+                                        <template v-slot:activator="{ on }">
+                                            <v-text-field 
+                                                v-model="newDeal.endDate" 
+                                                label="Дата по" 
+                                                readonly 
+                                                v-on="on"
+                                                prepend-icon="mdi-calendar"
+                                            ></v-text-field>
+                                        </template>
+                                        <v-date-picker 
+                                            v-model="newDeal.endDate" 
+                                            @input="dealDateMenu2 = false"
+                                            :locale="ruLocale"
+                                            :first-day-of-week="1"
+                                            :min="newDeal.startDate"
+                                        ></v-date-picker>
+                                    </v-menu>
+                                    <v-btn color="primary" @click="checkDeal">Проверить возможность</v-btn>
+                                    <v-btn color="success" @click="addDeal" :disabled="!canAddDeal">Добавить сделку</v-btn>
+                                    <v-alert v-if="dealCheckResult" :type="canAddDeal ? 'success' : 'error'" class="mt-4">
+                                        {{ dealCheckResult }}
+                                    </v-alert>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                        <v-col cols="12" md="8">
+                            <v-card>
+                                <v-card-title>График загрузки</v-card-title>
+                                <v-card-text>
+                                    <canvas id="loadChart"></canvas>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                </div>
+            </v-main>
+        </v-app>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.x"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0/dist/chartjs-adapter-moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/locale/ru.js"></script>
+    <script>
+        moment.locale('ru');
+        
+        new Vue({
+            el: '#app',
+            vuetify: new Vuetify({
+                lang: {
+                    locales: [ 'ru' ],
+                    current: 'ru'
+                },
+                date: {
+                    locale: 'ru',
+                    firstDayOfWeek: 1
+                }
+            }),
+            data() {
+                return {
+                    ruLocale: {
+                        firstDayOfWeek: 1,
+                        masks: {
+                            weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+                            months: [
+                                'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+                                'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+                            ]
+                        }
+                    },
+                    employees: [
+                        { name: 'Иванов И.И.', schedule: {} },
+                        { name: 'Петров П.П.', schedule: {} },
+                        { name: 'Сидорова А.В.', schedule: {} }
+                    ],
+                    newEmployee: { name: '' },
+                    selectedEmployee: null,
+                    scheduleAction: 'Выходные',
+                    scheduleActions: ['Рабочие дни', 'Отпуск', 'Больничный'],
+                    scheduleDateStart: moment().format('YYYY-MM-DD'),
+                    scheduleDateEnd: moment().add(1, 'week').format('YYYY-MM-DD'),
+                    dateMenu1: false,
+                    dateMenu2: false,
+                    newDeal: { 
+                        manDays: 5, 
+                        startDate: moment().format('YYYY-MM-DD'), 
+                        endDate: moment().add(5, 'days').format('YYYY-MM-DD') 
+                    },
+                    dealDateMenu1: false,
+                    dealDateMenu2: false,
+                    deals: [],
+                    dealCheckResult: null,
+                    canAddDeal: false,
+                    chart: null
+                };
+            },
+            methods: {
+                addEmployee() {
+                    if (this.newEmployee.name) {
+                        this.employees.push({
+                            name: this.newEmployee.name,
+                            schedule: {}
+                        });
+                        this.newEmployee.name = '';
+                        this.updateChart();
+                    }
+                },
+                applySchedule() {
+                    if (!this.selectedEmployee || !this.scheduleAction || !this.scheduleDateStart || !this.scheduleDateEnd) return;
+
+                    const start = moment(this.scheduleDateStart);
+                    const end = moment(this.scheduleDateEnd);
+                    const status = this.scheduleAction === 'Рабочие дни' ? 'working' : 
+                                  this.scheduleAction === 'Выходные' ? 'weekend' :
+                                  this.scheduleAction === 'Отпуск' ? 'vacation' : 'sick';
+
+                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
+                        const dateStr = m.format('YYYY-MM-DD');
+                        // Если это выходные и мы не устанавливаем рабочие дни - применяем
+                        if (this.isWeekend(dateStr) && this.scheduleAction !== 'Рабочие дни') {
+                            this.selectedEmployee.schedule[dateStr] = status;
+                        }
+                        // Если это будни и мы не устанавливаем выходные - применяем
+                        else if (!this.isWeekend(dateStr) && this.scheduleAction !== 'Выходные') {
+                            this.selectedEmployee.schedule[dateStr] = status;
+                        }
+                    }
+                    this.updateChart();
+                },
+                isWeekend(dateStr) {
+                    const day = moment(dateStr).day();
+                    return day === 0 || day === 6; // Воскресенье или суббота
+                },
+                checkDeal() {
+                    if (!this.newDeal.manDays || !this.newDeal.startDate || !this.newDeal.endDate) return;
+
+                    const start = moment(this.newDeal.startDate);
+                    const end = moment(this.newDeal.endDate);
+                    const days = end.diff(start, 'days') + 1;
+                    const workDays = this.countWorkDays(start, end);
+                    const avgLoad = workDays > 0 ? this.newDeal.manDays / workDays : 0;
+
+                    let canAdd = true;
+                    let maxLoad = 0;
+                    let problemDate = null;
+                    
+                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
+                        const dateStr = m.format('YYYY-MM-DD');
+                        if (!this.isWorkDay(dateStr)) continue;
+                        
+                        const availableManDays = this.getAvailableManDays(dateStr);
+                        const occupiedManDays = this.getOccupiedManDays(dateStr);
+                        const totalLoad = occupiedManDays + avgLoad;
+
+                        if (totalLoad > availableManDays * 0.9) {
+                            canAdd = false;
+                            problemDate = dateStr;
+                        }
+                        maxLoad = Math.max(maxLoad, totalLoad);
+                    }
+
+                    this.canAddDeal = canAdd;
+                    this.dealCheckResult = canAdd 
+                        ? `Сделку можно взять. Максимальная загрузка: ${maxLoad.toFixed(2)} ЧД`
+                        : `Сделку нельзя взять. Превышение загрузки ${maxLoad.toFixed(2)} ЧД на дату ${moment(problemDate).format('DD.MM.YYYY')}`;
+                    this.updateChart();
+                },
+                countWorkDays(start, end) {
+                    let count = 0;
+                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
+                        if (this.isWorkDay(m.format('YYYY-MM-DD'))) count++;
+                    }
+                    return count;
+                },
+                isWorkDay(dateStr) {
+                    // Проверяем, является ли день рабочим (не выходной и не отмечен как нерабочий)
+                    if (this.isWeekend(dateStr)) return false;
+                    
+                    // Проверяем, есть ли сотрудники, работающие в этот день
+                    return this.employees.some(emp => {
+                        const status = emp.schedule[dateStr];
+                        return !status || status === 'working';
+                    });
+                },
+                addDeal() {
+                    if (this.canAddDeal) {
+                        this.deals.push({ ...this.newDeal });
+                        this.newDeal = { 
+                            manDays: 5, 
+                            startDate: moment().format('YYYY-MM-DD'), 
+                            endDate: moment().add(5, 'days').format('YYYY-MM-DD') 
+                        };
+                        this.dealCheckResult = null;
+                        this.canAddDeal = false;
+                        this.updateChart();
+                    }
+                },
+                getAvailableManDays(date) {
+                    return this.employees.filter(emp => {
+                        const status = emp.schedule[date];
+                        // Если статус не установлен, считаем что сотрудник работает в будни
+                        if (!status) return !this.isWeekend(date);
+                        return status === 'working';
+                    }).length;
+                },
+                getOccupiedManDays(date) {
+                    if (!this.isWorkDay(date)) return 0;
+                    
+                    let total = 0;
+                    this.deals.forEach(deal => {
+                        const start = moment(deal.startDate);
+                        const end = moment(deal.endDate);
+                        if (moment(date).isBetween(start, end, null, '[]')) {
+                            const workDays = this.countWorkDays(start, end);
+                            if (workDays > 0) {
+                                total += deal.manDays / workDays;
+                            }
+                        }
+                    });
+                    return total;
+                },
+                getRedistributedManDays(date) {
+                    // Упрощенная реализация перераспределения
+                    return this.getOccupiedManDays(date);
+                },
+                updateChart() {
+                    const ctx = document.getElementById('loadChart').getContext('2d');
+                    const startDate = moment().subtract(1, 'week');
+                    const endDate = moment().add(3, 'weeks');
+                    const dates = [];
+                    const availableData = [];
+                    const occupiedData = [];
+                    const thresholdData = [];
+
+                    for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
+                        const dateStr = m.format('YYYY-MM-DD');
+                        dates.push(m.format('DD.MM'));
+                        const available = this.getAvailableManDays(dateStr);
+                        availableData.push(available);
+                        occupiedData.push(this.getOccupiedManDays(dateStr));
+                        thresholdData.push(available * 0.9);
+                    }
+
+                    if (this.chart) this.chart.destroy();
+                    this.chart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: dates,
+                            datasets: [
+                                {
+                                    label: 'Доступно ЧД',
+                                    data: availableData,
+                                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                                    borderColor: 'rgba(54, 162, 235, 1)',
+                                    borderWidth: 1
+                                },
+                                {
+                                    label: 'Занято ЧД',
+                                    data: occupiedData,
+                                    backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                                    borderColor: 'rgba(255, 99, 132, 1)',
+                                    borderWidth: 1
+                                },
+                                {
+                                    label: '90% порог',
+                                    data: thresholdData,
+                                    type: 'line',
+                                    borderColor: 'rgba(255, 206, 86, 1)',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5],
+                                    fill: false,
+                                    pointRadius: 0
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: {
+                                    stacked: false,
+                                },
+                                y: {
+                                    stacked: false,
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Человеко-дни'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            let label = context.dataset.label || '';
+                                            if (label) {
+                                                label += ': ';
+                                            }
+                                            label += Math.round(context.raw * 100) / 100;
+                                            return label;
+                                        }
+                                    }
+                                },
+                                legend: {
+                                    position: 'top',
+                                }
+                            }
+                        }
+                    });
+                }
+            },
+            mounted() {
+                this.updateChart();
+            }
+        });
+    </script>
+</body>
+</html>
+<style>
+    .wrapper {
+        margin: 0 1rem 0 2rem;
+    }
+    @media (max-width: 900px) {
+        .wrapper  {
+            margin: 0 0 0 1rem;
+        }
+    }
+</style>
