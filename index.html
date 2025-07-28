@@ -9,11 +9,12 @@
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.x/css/materialdesignicons.min.css" rel="stylesheet">
     <style>
         .wrapper {
-            margin: 0 1rem 0 2rem;
+            margin: 0.5rem 0;
+
         }
         @media (max-width: 900px) {
             .wrapper  {
-                margin: 0 0 0 1rem;
+                margin: 0;
             }
         }
         .load-cell {
@@ -77,7 +78,7 @@
         .main-table .load-cell {
         text-align: center;
         padding: 8px 12px;
-        min-width: 40px;
+        min-width: 5.5rem;
         }
 
         /* Стили для выходных дней */
@@ -133,31 +134,15 @@
                 <v-toolbar-title>Планирование заказов</v-toolbar-title>
                 <v-spacer></v-spacer>
                 <v-btn text @click="planning">Планирование</v-btn>
-                <v-btn text @click="loadTable">Таблица загрузки</v-btn>
+                <v-btn text @click="loadTable">Рабочие графики</v-btn>
             </v-app-bar>
             <v-main>
                 <div class="wrapper">
                     <div v-if="currentView === 'planning'">
-                        <v-row>
                             <v-col cols="12" md="4">
                                 <v-card>
-                                    <v-card-title>Добавить сотрудника</v-card-title>
-                                    <v-card-text>
-                                        <v-text-field v-model="newEmployee.name" label="Имя сотрудника"></v-text-field>
-                                        <v-btn color="primary" @click="addEmployee">Добавить</v-btn>
-                                    </v-card-text>
-                                </v-card>
-                                <v-card class="mt-4">
                                     <v-card-title>Управление графиком</v-card-title>
                                     <v-card-text>
-                                        <v-select 
-                                            v-model="selectedEmployee" 
-                                            :items="employees" 
-                                            label="Сотрудник" 
-                                            item-text="name" 
-                                            return-object
-                                            :menu-props="{ closeOnContentClick: true }"
-                                        ></v-select>
                                         <v-select 
                                             v-model="scheduleAction" 
                                             :items="scheduleActions" 
@@ -211,67 +196,6 @@
                                         <v-btn color="primary" @click="applySchedule">Применить</v-btn>
                                     </v-card-text>
                                 </v-card>
-                                <v-card class="mt-4">
-                                    <v-card-title>Новая сделка</v-card-title>
-                                    <v-card-text>
-                                        <v-text-field 
-                                            v-model.number="newDeal.manDays" 
-                                            type="number" 
-                                            label="Человеко-дни"
-                                            min="1"
-                                        ></v-text-field>
-                                        <v-menu 
-                                            v-model="dealDateMenu1" 
-                                            :close-on-content-click="false" 
-                                            max-width="290"
-                                            :locale="ruLocale"
-                                        >
-                                            <template v-slot:activator="{ on }">
-                                                <v-text-field 
-                                                    v-model="newDeal.startDate" 
-                                                    label="Дата с" 
-                                                    readonly 
-                                                    v-on="on"
-                                                    prepend-icon="mdi-calendar"
-                                                ></v-text-field>
-                                            </template>
-                                            <v-date-picker 
-                                                v-model="newDeal.startDate" 
-                                                @input="dealDateMenu1 = false"
-                                                :locale="ruLocale"
-                                                :first-day-of-week="1"
-                                            ></v-date-picker>
-                                        </v-menu>
-                                        <v-menu 
-                                            v-model="dealDateMenu2" 
-                                            :close-on-content-click="false" 
-                                            max-width="290"
-                                            :locale="ruLocale"
-                                        >
-                                            <template v-slot:activator="{ on }">
-                                                <v-text-field 
-                                                    v-model="newDeal.endDate" 
-                                                    label="Дата по" 
-                                                    readonly 
-                                                    v-on="on"
-                                                    prepend-icon="mdi-calendar"
-                                                ></v-text-field>
-                                            </template>
-                                            <v-date-picker 
-                                                v-model="newDeal.endDate" 
-                                                @input="dealDateMenu2 = false"
-                                                :locale="ruLocale"
-                                                :first-day-of-week="1"
-                                                :min="newDeal.startDate"
-                                            ></v-date-picker>
-                                        </v-menu>
-                                        <v-btn color="primary" @click="checkDeal">Проверить возможность</v-btn>
-                                        <v-btn color="success" @click="addDeal" :disabled="!canAddDeal">Добавить сделку</v-btn>
-                                        <v-alert v-if="dealCheckResult" :type="canAddDeal ? 'success' : 'error'" class="mt-4">
-                                            {{ dealCheckResult }}
-                                        </v-alert>
-                                    </v-card-text>
-                                </v-card>
                             </v-col>
                             <v-col cols="12" md="8">
                                 <v-card>
@@ -281,12 +205,11 @@
                                     </v-card-text>
                                 </v-card>
                             </v-col>
-                        </v-row>
                     </div>
-
                     <div v-if="currentView === 'loadTable'">
+                        <v-col cols="12" md="8">
                         <v-card>
-                            <v-card-title>Таблица загрузки сотрудников</v-card-title>
+                            <v-card-title>Рабочие графики сотрудников</v-card-title>
                             <v-card-text>
                                 <v-row>
                                     <v-col cols="12" md="4">
@@ -351,6 +274,26 @@
                                 </div>
                             </v-card-text>
                         </v-card>
+                        </v-col>
+                        <v-col cols="12" md="8">
+                                <v-card>
+                                    <v-card-title>Управление сотрудниками</v-card-title>
+                                    <v-card-text>
+                                        <v-text-field v-model="newEmployee.name" label="Имя сотрудника"></v-text-field>
+                                        <v-btn color="primary" @click="addEmployee">Добавить</v-btn>
+                                        <v-autocomplete
+                                            v-model="selectedEmployee" 
+                                            :items="employees" 
+                                            label="Сотрудник" 
+                                            item-text="name" 
+                                            return-object
+                                            :menu-props="{ closeOnContentClick: true }"
+                                            class="mt-4"
+                                        ></v-autocomplete>
+                                        <v-btn color="error" @click="removeEmployee" :disabled="!selectedEmployee">Уволить</v-btn>
+                                    </v-card-text>
+                                </v-card>
+                                </v-col>
                     </div>
                 </div>
             </v-main>
@@ -441,6 +384,16 @@
                         });
                         this.newEmployee.name = '';
                         this.updateChart();
+                    }
+                },
+                removeEmployee() {
+                    if (this.selectedEmployee) {
+                        const index = this.employees.indexOf(this.selectedEmployee);
+                        if (index !== -1) {
+                            this.employees.splice(index, 1);
+                            this.selectedEmployee = null;
+                            this.updateChart();
+                        }
                     }
                 },
                 applySchedule() {
