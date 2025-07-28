@@ -139,6 +139,102 @@
             <v-main>
                 <div class="wrapper">
                     <div v-if="currentView === 'planning'">
+                        <v-col cols="12">
+                        <v-card>
+                            <v-card-title>Рабочие графики сотрудников</v-card-title>
+                            <v-card-text>
+                            <v-row>
+                                <v-col cols="12" md="6">
+                                    <v-menu 
+                                        v-model="tableDateMenu1" 
+                                        :close-on-content-click="false" 
+                                        max-width="290"
+                                        :locale="ruLocale"
+                                    >
+                                        <template v-slot:activator="{ on }">
+                                            <v-text-field 
+                                                v-model="tableDateStart" 
+                                                label="Дата с" 
+                                                readonly 
+                                                v-on="on"
+                                                prepend-icon="mdi-calendar"
+                                            ></v-text-field>
+                                        </template>
+                                        <v-date-picker 
+                                            v-model="tableDateStart" 
+                                            @input="updateTableDates"
+                                            :locale="ruLocale"
+                                            :first-day-of-week="1"
+                                            :max="tableDateEnd"
+                                        ></v-date-picker>
+                                    </v-menu>
+                                </v-col>
+                                <v-col cols="12" md="6">
+                                    <v-menu 
+                                        v-model="tableDateMenu2" 
+                                        :close-on-content-click="false" 
+                                        max-width="290"
+                                        :locale="ruLocale"
+                                    >
+                                        <template v-slot:activator="{ on }">
+                                            <v-text-field 
+                                                v-model="tableDateEnd" 
+                                                label="Дата по" 
+                                                readonly 
+                                                v-on="on"
+                                                prepend-icon="mdi-calendar"
+                                            ></v-text-field>
+                                        </template>
+                                        <v-date-picker 
+                                            v-model="tableDateEnd" 
+                                            @input="updateTableDates"
+                                            :locale="ruLocale"
+                                            :first-day-of-week="1"
+                                            :min="tableDateStart"
+                                        ></v-date-picker>
+                                    </v-menu>
+                                </v-col>
+                            </v-row>
+                                <div style="overflow-x: auto;">
+                                    <table class="main-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="min-width: 150px;">Сотрудник</th>
+                                                <th v-for="date in tableDates" :key="date" class="load-cell" 
+                                                    :class="{ 'weekend': isWeekend(date) }">
+                                                    {{ formatTableDate(date) }}
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="employee in employees" :key="employee.name">
+                                                <td>{{ employee.name }}</td>
+                                                <td v-for="date in tableDates" :key="date" class="load-cell"
+                                                    :class="getCellClass(employee, date)">
+                                                    <v-icon 
+                                                            :color="getCellContent(employee, date).color"
+                                                            :title="getCellContent(employee, date).tooltip"
+                                                        >
+                                                            {{ getCellContent(employee, date).icon }}
+                                                        </v-icon>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </v-card-text>
+                        </v-card>
+                        </v-col>
+                            <v-col cols="12">
+                                <v-card>
+                                    <v-card-title>График загрузки</v-card-title>
+                                    <v-card-text>
+                                        <canvas id="loadChart"></canvas>
+                                    </v-card-text>
+                                </v-card>
+                            </v-col>
+                    </div>
+                    <div v-if="currentView === 'loadTable'">
                             <v-col cols="12">
                                 <v-card>
                                     <v-card-title>Управление графиком</v-card-title>
@@ -197,84 +293,6 @@
                                     </v-card-text>
                                 </v-card>
                             </v-col>
-                            <v-col cols="12">
-                                <v-card>
-                                    <v-card-title>График загрузки</v-card-title>
-                                    <v-card-text>
-                                        <canvas id="loadChart"></canvas>
-                                    </v-card-text>
-                                </v-card>
-                            </v-col>
-                    </div>
-                    <div v-if="currentView === 'loadTable'">
-                        <v-col cols="12">
-                        <v-card>
-                            <v-card-title>Рабочие графики сотрудников</v-card-title>
-                            <v-card-text>
-                                <v-row>
-                                    <v-col cols="12">
-                                        <v-menu 
-                                            v-model="tableDateMenu1" 
-                                            :close-on-content-click="false" 
-                                            max-width="290"
-                                            :locale="ruLocale"
-                                        >
-                                            <template v-slot:activator="{ on }">
-                                                <v-text-field 
-                                                    v-model="tableDateStart" 
-                                                    label="Дата с" 
-                                                    readonly 
-                                                    v-on="on"
-                                                    prepend-icon="mdi-calendar"
-                                                ></v-text-field>
-                                            </template>
-                                            <v-date-picker 
-                                                v-model="tableDateStart" 
-                                                @input="updateTableDates"
-                                                :locale="ruLocale"
-                                                :first-day-of-week="1"
-                                            ></v-date-picker>
-                                        </v-menu>
-                                    </v-col>
-                                    <v-col cols="12">
-                                        <v-text-field
-                                            v-model="tableDaysCount"
-                                            label="Количество дней"
-                                            @change="updateTableDates"
-                                        ></v-text-field>
-                                    </v-col>
-                                </v-row>
-                                
-                                <div style="overflow-x: auto;">
-                                    <table class="main-table">
-                                        <thead>
-                                            <tr>
-                                                <th style="min-width: 150px;">Сотрудник</th>
-                                                <th v-for="date in tableDates" :key="date" class="load-cell" 
-                                                    :class="{ 'weekend': isWeekend(date) }">
-                                                    {{ formatTableDate(date) }}
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr v-for="employee in employees" :key="employee.name">
-                                                <td>{{ employee.name }}</td>
-                                                <td v-for="date in tableDates" :key="date" class="load-cell"
-                                                    :class="getCellClass(employee, date)">
-                                                    <v-icon 
-                                                            :color="getCellContent(employee, date).color"
-                                                            :title="getCellContent(employee, date).tooltip"
-                                                        >
-                                                            {{ getCellContent(employee, date).icon }}
-                                                        </v-icon>
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </v-card-text>
-                        </v-card>
-                        </v-col>
                         <v-col cols="12">
                                 <v-card>
                                     <v-card-title>Управление сотрудниками</v-card-title>
@@ -360,10 +378,19 @@
                     chart: null,
                     // Для таблицы загрузки
                     tableDateStart: moment().format('YYYY-MM-DD'),
-                    tableDaysCount: 7,
+                    tableDateEnd: moment().add(6, 'days').format('YYYY-MM-DD'),
                     tableDates: [],
-                    tableDateMenu1: false
+                    tableDateMenu1: false,
+                    tableDateMenu2: false,
                 };
+            },
+            computed:{
+                tableDaysCount() {
+                    if (!this.tableDateStart || !this.tableDateEnd) return 0;
+                    const start = moment(this.tableDateStart);
+                    const end = moment(this.tableDateEnd);
+                    return end.diff(start, 'days') + 1; // +1 чтобы включить начальный день
+                },
             },
             methods: {
                 planning(){
