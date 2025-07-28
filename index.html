@@ -139,6 +139,79 @@
             <v-main>
                 <div class="wrapper">
                     <div v-if="currentView === 'planning'">
+                            <v-col cols="12">
+                                <v-card class="mt-4">
+                                    <v-card-title>Новая сделка</v-card-title>
+                                    <v-card-text>
+                                        <v-text-field 
+                                            v-model.number="newDeal.manDays" 
+                                            type="number" 
+                                            label="Человеко-дни"
+                                            min="1"
+                                        ></v-text-field>
+                                        <v-menu 
+                                            v-model="dealDateMenu1" 
+                                            :close-on-content-click="false" 
+                                            max-width="290"
+                                            :locale="ruLocale"
+                                        >
+                                            <template v-slot:activator="{ on }">
+                                                <v-text-field 
+                                                    v-model="newDeal.startDate" 
+                                                    label="Дата с" 
+                                                    readonly 
+                                                    v-on="on"
+                                                    prepend-icon="mdi-calendar"
+                                                ></v-text-field>
+                                            </template>
+                                            <v-date-picker 
+                                                v-model="newDeal.startDate" 
+                                                @input="dealDateMenu1 = false"
+                                                :locale="ruLocale"
+                                                :first-day-of-week="1"
+                                                :max="newDeal.endDate"
+                                            ></v-date-picker>
+                                        </v-menu>
+                                        <v-menu 
+                                            v-model="dealDateMenu2" 
+                                            :close-on-content-click="false" 
+                                            max-width="290"
+                                            :locale="ruLocale"
+                                        >
+                                            <template v-slot:activator="{ on }">
+                                                <v-text-field 
+                                                    v-model="newDeal.endDate" 
+                                                    label="Дата по" 
+                                                    readonly 
+                                                    v-on="on"
+                                                    prepend-icon="mdi-calendar"
+                                                ></v-text-field>
+                                            </template>
+                                            <v-date-picker 
+                                                v-model="newDeal.endDate" 
+                                                @input="dealDateMenu2 = false"
+                                                :locale="ruLocale"
+                                                :first-day-of-week="1"
+                                                :min="newDeal.startDate"
+                                            ></v-date-picker>
+                                        </v-menu>
+                                        <v-btn color="primary" @click="checkDeal">Проверить возможность</v-btn>
+                                        <v-alert v-if="dealCheckResult" :type="canAddDeal ? 'success' : 'error'" class="mt-4">
+                                            {{ dealCheckResult }}
+                                        </v-alert>
+                                    </v-card-text>
+                                </v-card>
+                            </v-col>
+                            <v-col cols="12">
+                                <v-card>
+                                    <v-card-title>График загрузки</v-card-title>
+                                    <v-card-text>
+                                        <canvas id="loadChart"></canvas>
+                                    </v-card-text>
+                                </v-card>
+                            </v-col>
+                    </div>
+                    <div v-if="currentView === 'loadTable'">
                         <v-col cols="12">
                         <v-card>
                             <v-card-title>Рабочие графики сотрудников</v-card-title>
@@ -225,16 +298,6 @@
                             </v-card-text>
                         </v-card>
                         </v-col>
-                            <v-col cols="12">
-                                <v-card>
-                                    <v-card-title>График загрузки</v-card-title>
-                                    <v-card-text>
-                                        <canvas id="loadChart"></canvas>
-                                    </v-card-text>
-                                </v-card>
-                            </v-col>
-                    </div>
-                    <div v-if="currentView === 'loadTable'">
                             <v-col cols="12">
                                 <v-card>
                                     <v-card-title>Управление графиком</v-card-title>
@@ -368,7 +431,7 @@
                     newDeal: { 
                         manDays: 5, 
                         startDate: moment().format('YYYY-MM-DD'), 
-                        endDate: moment().add(5, 'days').format('YYYY-MM-DD') 
+                        endDate: moment().add(6, 'days').format('YYYY-MM-DD') 
                     },
                     dealDateMenu1: false,
                     dealDateMenu2: false,
