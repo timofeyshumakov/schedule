@@ -139,7 +139,7 @@
             <v-main>
                 <div class="wrapper">
                     <div v-if="currentView === 'planning'">
-                            <v-col cols="12" md="4">
+                            <v-col cols="12">
                                 <v-card>
                                     <v-card-title>Управление графиком</v-card-title>
                                     <v-card-text>
@@ -197,7 +197,7 @@
                                     </v-card-text>
                                 </v-card>
                             </v-col>
-                            <v-col cols="12" md="8">
+                            <v-col cols="12">
                                 <v-card>
                                     <v-card-title>График загрузки</v-card-title>
                                     <v-card-text>
@@ -212,7 +212,7 @@
                             <v-card-title>Рабочие графики сотрудников</v-card-title>
                             <v-card-text>
                                 <v-row>
-                                    <v-col cols="12" md="4">
+                                    <v-col cols="12">
                                         <v-menu 
                                             v-model="tableDateMenu1" 
                                             :close-on-content-click="false" 
@@ -236,7 +236,7 @@
                                             ></v-date-picker>
                                         </v-menu>
                                     </v-col>
-                                    <v-col cols="12" md="4">
+                                    <v-col cols="12">
                                         <v-text-field
                                             v-model="tableDaysCount"
                                             label="Количество дней"
@@ -275,7 +275,7 @@
                             </v-card-text>
                         </v-card>
                         </v-col>
-                        <v-col cols="12" md="8">
+                        <v-col cols="12">
                                 <v-card>
                                     <v-card-title>Управление сотрудниками</v-card-title>
                                     <v-card-text>
