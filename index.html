@@ -271,7 +271,7 @@
                                     </v-menu>
                                 </v-col>
                             </v-row>
-                                <div style="overflow-x: auto;">
+                                <div style="overflow-x: auto;" class="table-wrapper" ref="tableWrapper" @wheel="handleWheelScroll">
                                     <table class="main-table">
                                         <thead>
                                             <tr>
@@ -425,7 +425,7 @@
                                             class="mt-4"
                                         ></v-autocomplete>
                                         <v-btn color="error" @click="removeEmployee" :disabled="!selectedEmployee">Уволить</v-btn>
-                                    </v-card-text>
+                                    </v-card-text>6666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
                                 </v-card>
                                 </v-col>
                     </div>
@@ -498,7 +498,7 @@
                     chart: null,
                     // Для таблицы загрузки
                     tableDateStart: moment().format('YYYY-MM-DD'),
-                    tableDateEnd: moment().add(6, 'days').format('YYYY-MM-DD'),
+                    tableDateEnd: moment().add(4, 'week').format('YYYY-MM-DD'),
                     tableDates: [],
                     tableDateMenu1: false,
                     tableDateMenu2: false,
@@ -513,6 +513,13 @@
                 },
             },
             methods: {
+                handleWheelScroll(e) {
+                    // Прокрутка только по горизонтали при скролле колесиком мыши
+                    if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
+                        this.$refs.tableWrapper.scrollLeft += e.deltaY;
+                        e.preventDefault();
+                    }
+                },
                 planning(){
                     this.currentView = 'planning';
                     setTimeout(() => {
