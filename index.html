@@ -10,7 +10,6 @@
     <style>
         .wrapper {
             margin: 0.5rem 0;
-
         }
         @media (max-width: 900px) {
             .wrapper  {
@@ -125,6 +124,10 @@
             padding: 4px 2px;
         }
         }
+        #loadChart {
+            width: 100%;
+            height: 400px;
+        }
     </style>
 </head>
 <body>
@@ -140,7 +143,7 @@
                 <div class="wrapper">
                     <div v-if="currentView === 'planning'">
                             <v-col cols="12">
-                                <v-card class="mt-4">
+                                <v-card>
                                     <v-card-title>Новая сделка</v-card-title>
                                     <v-card-text>
                                         <v-text-field 
@@ -206,7 +209,7 @@
                                 <v-card>
                                     <v-card-title>График загрузки</v-card-title>
                                     <v-card-text>
-                                        <canvas id="loadChart"></canvas>
+                                        <div id="loadChart"></div>
                                     </v-card-text>
                                 </v-card>
                             </v-col>
@@ -282,8 +285,12 @@
                                         <tbody>
                                             <tr v-for="employee in employees" :key="employee.name">
                                                 <td>{{ employee.name }}</td>
-                                                <td v-for="date in tableDates" :key="date" class="load-cell"
-                                                    :class="getCellClass(employee, date)">
+                                                <td v-for="date in tableDates" 
+                                                    :key="date" 
+                                                    class="load-cell"
+                                                    :class="getCellClass(employee, date)"
+                                                    @click="changeIcon(employee, date)"
+                                                >
                                                     <v-icon 
                                                             :color="getCellContent(employee, date).color"
                                                             :title="getCellContent(employee, date).tooltip"
@@ -297,17 +304,63 @@
                                 </div>
                             </v-card-text>
                         </v-card>
+                        <v-dialog v-model="iconDialog" max-width="500">
+                            <v-card>
+                            <v-card-title>Выберите статус</v-card-title>
+                            <v-card-text>
+                                <v-radio-group v-model="selectedStatus">
+                                <v-radio value="working" color="green">
+                                    <template v-slot:label>
+                                    <v-icon color="green">mdi-briefcase</v-icon>
+                                    <span class="ml-2">Рабочий день</span>
+                                    </template>
+                                </v-radio>
+                                <v-radio value="vacation" color="orange">
+                                    <template v-slot:label>
+                                    <v-icon color="orange">mdi-palm-tree</v-icon>
+                                    <span class="ml-2">Отпуск</span>
+                                    </template>
+                                </v-radio>
+                                <v-radio value="sick" color="red">
+                                    <template v-slot:label>
+                                    <v-icon color="red">mdi-hospital-box</v-icon>
+                                    <span class="ml-2">Больничный</span>
+                                    </template>
+                                </v-radio>
+                                <v-radio value="weekend" color="grey">
+                                    <template v-slot:label>
+                                    <v-icon color="grey">mdi-sofa</v-icon>
+                                    <span class="ml-2">Выходной</span>
+                                    </template>
+                                </v-radio>
+                                </v-radio-group>
+                            </v-card-text>
+                            <v-card-actions>
+                                <v-spacer></v-spacer>
+                                <v-btn color="primary" @click="saveIconChange">Сохранить</v-btn>
+                                <v-btn color="secondary" @click="iconDialog = false">Отмена</v-btn>
+                            </v-card-actions>
+                            </v-card>
+                        </v-dialog>
                         </v-col>
                             <v-col cols="12">
                                 <v-card>
                                     <v-card-title>Управление графиком</v-card-title>
                                     <v-card-text>
-                                        <v-select 
+                                    <v-autocomplete 
+                                        v-model="selectedEmployee" 
+                                        :items="employees" 
+                                        label="Сотрудник" 
+                                        item-text="name" 
+                                        return-object
+                                        :menu-props="{ closeOnContentClick: true }"
+                                    ></v-autocomplete>
+                                        <v-autocomplete
                                             v-model="scheduleAction" 
                                             :items="scheduleActions" 
                                             label="Действие"
                                             :menu-props="{ closeOnContentClick: true }"
-                                        ></v-select>
+                                        ></v-autocomplete>
                                         <v-menu 
                                             v-model="dateMenu1" 
                                             :close-on-content-click="false" 
@@ -383,9 +436,11 @@
 
     <script src="https://cdn.jsdelivr.net/npm/vue@2.x"></script>
     <script src="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/lang/ru.js"></script>
+    <script src="https://code.highcharts.com/modules/exporting.js"></script>
+    <script src="https://code.highcharts.com/modules/export-data.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0/dist/chartjs-adapter-moment.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/locale/ru.js"></script>
     <script>
         moment.locale('ru');
@@ -420,6 +475,8 @@
                         { name: 'Петров П.П.', schedule: {} },
                         { name: 'Сидорова А.В.', schedule: {} }
                     ],
+                    iconDialog: false,
+                    selectedStatus: null,
                     newEmployee: { name: '' },
                     selectedEmployee: null,
                     scheduleAction: 'Выходные',
@@ -459,9 +516,8 @@
                 planning(){
                     this.currentView = 'planning';
                     setTimeout(() => {
-                        // Ваш код с задержкой
                         this.updateChart();
-                    }, 500);
+                    }, 200);
                 }, 
                 loadTable(){
                     this.currentView = 'loadTable';
@@ -492,21 +548,15 @@
                     const start = moment(this.scheduleDateStart);
                     const end = moment(this.scheduleDateEnd);
                     const status = this.scheduleAction === 'Рабочие дни' ? 'working' : 
-                                  this.scheduleAction === 'Выходные' ? 'weekend' :
-                                  this.scheduleAction === 'Отпуск' ? 'vacation' : 'sick';
+                                this.scheduleAction === 'Выходные' ? 'weekend' :
+                                this.scheduleAction === 'Отпуск' ? 'vacation' : 'sick';
 
                     for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
                         const dateStr = m.format('YYYY-MM-DD');
-                        // Если это выходные и мы не устанавливаем рабочие дни - применяем
-                        if (this.isWeekend(dateStr) && this.scheduleAction !== 'Рабочие дни') {
-                            this.selectedEmployee.schedule[dateStr] = status;
-                        }
-                        // Если это будни и мы не устанавливаем выходные - применяем
-                        else if (!this.isWeekend(dateStr) && this.scheduleAction !== 'Выходные') {
-                            this.selectedEmployee.schedule[dateStr] = status;
-                        }
+                        // Удаляем проверку на выходные/рабочие дни
+                        this.selectedEmployee.schedule[dateStr] = status;
                     }
-                    this.updateChart();
+                    this.updateTableDates();
                 },
                 isWeekend(dateStr) {
                     const day = moment(dateStr).day();
@@ -598,88 +648,141 @@
                     return total;
                 },
                 updateChart() {
-                    const ctx = document.getElementById('loadChart').getContext('2d');
-                    const startDate = moment().subtract(1, 'week');
-                    const endDate = moment().add(3, 'weeks');
-                    const dates = [];
+                    const startDate = moment();
+                    const endDate = moment().add(52, 'weeks');
+                    const categories = [];
                     const availableData = [];
                     const occupiedData = [];
                     const thresholdData = [];
 
                     for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
                         const dateStr = m.format('YYYY-MM-DD');
-                        dates.push(m.format('DD.MM'));
+                        categories.push(m.format('DD.MM'));
                         const available = this.getAvailableManDays(dateStr);
                         availableData.push(available);
                         occupiedData.push(this.getOccupiedManDays(dateStr));
                         thresholdData.push(available * 0.9);
                     }
 
-                    if (this.chart) this.chart.destroy();
-                    this.chart = new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: dates,
-                            datasets: [
-                                {
-                                    label: 'Доступно ЧД',
-                                    data: availableData,
-                                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                                    borderColor: 'rgba(54, 162, 235, 1)',
-                                    borderWidth: 1
-                                },
-                                {
-                                    label: 'Занято ЧД',
-                                    data: occupiedData,
-                                    backgroundColor: 'rgba(255, 99, 132, 0.5)',
-                                    borderColor: 'rgba(255, 99, 132, 1)',
-                                    borderWidth: 1
-                                },
-                                {
-                                    label: '90% порог',
-                                    data: thresholdData,
-                                    type: 'line',
-                                    borderColor: 'rgba(255, 206, 86, 1)',
-                                    borderWidth: 2,
-                                    borderDash: [5, 5],
-                                    fill: false,
-                                    pointRadius: 0
-                                }
-                            ]
+                    Highcharts.chart('loadChart', {
+                        lang: {
+                            contextButtonTitle: "Контекстное меню",
+                            decimalPoint: ",",
+                            downloadJPEG: "Скачать JPEG",
+                            downloadPDF: "Скачать PDF",
+                            downloadPNG: "Скачать PNG",
+                            downloadSVG: "Скачать SVG",
+                            downloadCSV: "Скачать CSV",
+                            downloadXLS: "Скачать XLS",
+                            viewFullscreen: "Полноэкранный режим",
+                            viewData: "",
+                            drillUpText: "Назад к {series.name}",
+                            loading: "Загрузка...",
+                            months: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
+                                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
+                            noData: "Нет данных для отображения",
+                            printChart: "Напечатать график",
+                            resetZoom: "Сбросить масштаб",
+                            resetZoomTitle: "Сбросить масштаб 1:1",
+                            shortMonths: ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", 
+                                        "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"],
+                            thousandsSep: " ",
+                            weekdays: ["Воскресенье", "Понедельник", "Вторник", "Среда", 
+                                    "Четверг", "Пятница", "Суббота"]
                         },
-                        options: {
-                            responsive: true,
-                            scales: {
-                                x: {
-                                    stacked: false,
+                        chart: {
+                            type: 'column',
+                            zoomType: 'x',
+                            panning: true,
+                            panKey: 'shift',
+                            events: {
+                                load: function() {
+                                    // Обработчик колесика мыши
+                                    this.container.onmousewheel = function(e) {
+                                        e = window.event || e;
+                                        const delta = Math.max(-1, Math.min(1, (e.wheelDelta || -e.detail)));
+                                        const xAxis = this.xAxis[0];
+                                        const extremes = xAxis.getExtremes();
+                                        const range = extremes.max - extremes.min;
+                                        const offset = range * 0.1 * delta;
+                                        
+                                        xAxis.setExtremes(
+                                            extremes.min + offset,
+                                            extremes.max + offset,
+                                            true, // Анимация
+                                            false // Не обновлять событие zoom
+                                        );
+                                        e.preventDefault();
+                                    }.bind(this);
                                 },
-                                y: {
-                                    stacked: false,
-                                    beginAtZero: true,
-                                    title: {
-                                        display: true,
-                                        text: 'Человеко-дни'
+                            }
+                        },
+                        title: {
+                            text: ''
+                        },
+                        subtitle: {
+                            text: 'Используйте колесико мыши для прокрутки влево/вправо, для масштабирования выделите интересующую область'
+                        },
+                        xAxis: {
+                            categories: categories,
+                            crosshair: true,
+                            events: {
+                                setExtremes: function(e) {
+                                    if (e.trigger === 'zoom') {
+                                        /*
+                                        if(!document.querySelector('.highcharts-reset-zoom')){
+                                            setTimeout(() => {
+                                                if(document.querySelector('.highcharts-reset-zoom')){
+                                                    console.log(document.querySelector('.highcharts-reset-zoom').querySelector('text').textContent = "Сбросить масштабирование");
+                                                }
+                                            }, 50);
+                                        }else{
+                                            console.log(document.querySelector('.highcharts-reset-zoom').querySelector('text').textContent = "Сбросить масштабирование");
+                                        }*/
                                     }
-                                }
-                            },
-                            plugins: {
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            let label = context.dataset.label || '';
-                                            if (label) {
-                                                label += ': ';
-                                            }
-                                            label += Math.round(context.raw * 100) / 100;
-                                            return label;
-                                        }
-                                    }
-                                },
-                                legend: {
-                                    position: 'top',
                                 }
                             }
-                        }
+                        },
+                        yAxis: {
+                            min: 0,
+                            title: {
+                                text: 'Человеко-дни'
+                            }
+                        },
+                        tooltip: {
+                            shared: true,
+                            formatter: function() {
+                                let s = '<b>' + this.x + '</b>';
+                                this.points.forEach(point => {
+                                    s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
+                                         point.series.name + ': ' + point.y.toFixed(2);
+                                });
+                                return s;
+                            }
+                        },
+                        plotOptions: {
+                            column: {
+                                stacking: 'normal'
+                            }
+                        },
+                        series: [{
+                            name: 'Доступно ЧД',
+                            data: availableData,
+                            color: '#36a2eb'
+                        }, {
+                            name: 'Занято ЧД',
+                            data: occupiedData,
+                            color: '#ff6384'
+                        }, {
+                            name: '90% порог',
+                            type: 'spline',
+                            data: thresholdData,
+                            color: '#ffce56',
+                            dashStyle: 'Dash',
+                            marker: {
+                                enabled: false
+                            }
+                        }]
                     });
                 },
                 // Методы для таблицы загрузки
@@ -694,18 +797,35 @@
                     const m = moment(date);
                     return m.format('DD.MM') + '\n' + m.format('ddd');
                 },
+                saveIconChange() {
+                    if (this.currentEmployee && this.currentDate) {
+                        // Упрощенная логика - просто сохраняем выбранный статус
+                        if (this.selectedStatus === 'working' || this.selectedStatus === 'weekend') {
+                            Vue.set(this.currentEmployee.schedule, this.currentDate, this.selectedStatus);
+                        } else {
+                            Vue.set(this.currentEmployee.schedule, this.currentDate, this.selectedStatus);
+                        }
+                    }
+                    this.iconDialog = false;
+                },
+                changeIcon(employee, date) {
+                    this.currentEmployee = employee;
+                    this.currentDate = date;
+                    this.selectedStatus = employee.schedule[date] || 
+                                        (this.isWeekend(date) ? 'weekend' : 'working');
+                    this.iconDialog = true;
+                },
                 getCellClass(employee, date) {
                     const status = employee.schedule[date];
                     if (status === 'vacation') return 'vacation';
                     if (status === 'sick') return 'sick';
                     if (status === 'weekend') return 'weekend';
-                    if (this.isWeekend(date)) return 'weekend';
-                    return 'working';
+                    if (status === 'working') return 'working';
+                    return this.isWeekend(date) ? 'weekend' : 'working';
                 },
                 getCellContent(employee, date) {
                     const status = employee.schedule[date];
                     
-                    // Возвращаем иконки для специальных статусов
                     if (status === 'vacation') {
                         return {
                             icon: 'mdi-palm-tree',
@@ -720,42 +840,39 @@
                             color: 'red'
                         };
                     }
-                    if (status === 'weekend' || this.isWeekend(date)) {
+                    if (status === 'weekend') {
                         return {
                             icon: 'mdi-sofa',
                             tooltip: 'Выходной',
                             color: 'grey'
                         };
                     }
-                    
-                    // Проверяем загрузку сотрудника
-                    let load = 0;
-                    this.deals.forEach(deal => {
-                        const start = moment(deal.startDate);
-                        const end = moment(deal.endDate);
-                        if (moment(date).isBetween(start, end, null, '[]')) {
-                            const workDays = this.countWorkDays(start, end);
-                            if (workDays > 0) {
-                                load += deal.manDays / workDays / this.getAvailableManDays(date);
-                            }
-                        }
-                    });
-                    
-                    if (load > 0) {
+                    if (status === 'working') {
                         return {
                             icon: 'mdi-briefcase',
-                            tooltip: `Загружен на ${(load * 100).toFixed(0)}%`,
-                            color: this.getLoadColor(load),
-                            text: `${(load * 100).toFixed(0)}%`
+                            tooltip: 'Рабочий день',
+                            color: 'green'
                         };
                     }
                     
-                    return {
-                        icon: 'mdi-emoticon-happy',
-                        tooltip: 'Свободен',
-                        color: 'green'
-                    };
+                    // Стандартное поведение, если статус не установлен
+                    return this.isWeekend(date) 
+                        ? {
+                            icon: 'mdi-sofa',
+                            tooltip: 'Выходной',
+                            color: 'grey'
+                        } 
+                        : {
+                            icon: 'mdi-briefcase',
+                            tooltip: 'Рабочий день',
+                            color: 'green'
+                        };
                 },
+                getLoadColor(load) {
+                    if (load > 0.9) return 'red';
+                    if (load > 0.7) return 'orange';
+                    return 'green';
+                }
             },
             mounted() {
                 this.updateChart();
