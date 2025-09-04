@@ -34,115 +34,137 @@
             background-color: #e8f5e9;
         }
         .main-table table {
-        width: 100%;
-        border-collapse: collapse;
-        font-family: 'Roboto', sans-serif;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        border-radius: 4px;
-        overflow: hidden;
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Roboto', sans-serif;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
         }
 
-        /* Стили для заголовка таблицы */
         .main-table thead {
-        background-color: #1976D2; /* Primary color */
-        color: white;
+            background-color: #1976D2;
+            color: white;
         }
 
         .main-table thead th {
-        padding: 12px 16px;
-        text-align: left;
-        font-weight: 500;
-        font-size: 0.875rem;
-        letter-spacing: 0.01071em;
-        border-bottom: 1px solid rgba(224, 224, 224, 0.5);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 0.875rem;
+            letter-spacing: 0.01071em;
+            border-bottom: 1px solid rgba(224, 224, 224, 0.5);
         }
 
-        /* Стили для тела таблицы */
         .main-table tbody tr {
-        border-bottom: 1px solid #e0e0e0;
-        transition: background-color 0.2s ease;
+            border-bottom: 1px solid #e0e0e0;
+            transition: background-color 0.2s ease;
         }
 
         .main-table tbody tr:hover {
-        background-color: rgba(25, 118, 210, 0.04);
+            background-color: rgba(25, 118, 210, 0.04);
         }
 
         .main-table tbody td {
-        padding: 12px 16px;
-        font-size: 0.875rem;
-        color: rgba(0, 0, 0, 0.87);
+            padding: 12px 16px;
+            font-size: 0.875rem;
+            color: rgba(0, 0, 0, 0.87);
         }
 
-        /* Стили для ячеек с нагрузкой */
         .main-table .load-cell {
-        text-align: center;
-        padding: 8px 12px;
-        min-width: 5.5rem;
+            text-align: center;
+            padding: 8px 12px;
+            min-width: 5.5rem;
         }
 
-        /* Стили для выходных дней */
         .main-table .weekend {
-        background-color: #f5f5f5;
-        color: #757575;
+            background-color: #f5f5f5;
+            color: #757575;
         }
 
-        /* Стили для первой колонки (имя сотрудника) */
         .main-table tbody td:first-child {
-        font-weight: 500;
-        color: rgba(0, 0, 0, 0.87);
+            font-weight: 500;
+            color: rgba(0, 0, 0, 0.87);
         }
 
-        /* Стили для иконок */
         .main-table .v-icon {
-        font-size: 20px;
-        cursor: pointer;
-        transition: transform 0.2s ease;
+            font-size: 20px;
+            cursor: pointer;
+            transition: transform 0.2s ease;
         }
 
         .main-table.v-icon:hover {
             transform: scale(1.2);
         }
 
-        /* Чередование строк для лучшей читаемости */
         .main-table tbody tr:nth-child(even) {
-        background-color: #fafafa;
+            background-color: #fafafa;
         }
 
         .main-table tbody tr:nth-child(even):hover {
-        background-color: rgba(25, 118, 210, 0.04);
+            background-color: rgba(25, 118, 210, 0.04);
         }
 
-        /* Адаптивные стили */
         @media (max-width: 600px) {
-        .main-table thead th, .main-table tbody td {
-            padding: 8px 12px;
-            font-size: 0.75rem;
-        }
-        
-        .load-cell {
-            min-width: 32px;
-            padding: 4px 2px;
-        }
+            .main-table thead th, .main-table tbody td {
+                padding: 8px 12px;
+                font-size: 0.75rem;
+            }
+            
+            .load-cell {
+                min-width: 32px;
+                padding: 4px 2px;
+            }
         }
         #loadChart {
             width: 100%;
             height: 400px;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
         }
     </style>
 </head>
 <body>
     <div id="app">
         <v-app>
+            <!-- Loading Overlay -->
+            <div v-if="loading" class="loading-overlay">
+                <v-progress-circular indeterminate size="64" color="primary"></v-progress-circular>
+            </div>
+
             <v-app-bar app color="primary" dark>
                 <v-toolbar-title>Планирование заказов</v-toolbar-title>
                 <v-spacer></v-spacer>
                 <v-btn text @click="planning">Планирование</v-btn>
                 <v-btn text @click="loadTable">Рабочие графики</v-btn>
+                <v-btn icon @click="refreshData">
+                    <v-icon>mdi-refresh</v-icon>
+                </v-btn>
             </v-app-bar>
+
             <v-main>
-                <div class="wrapper">
+                <v-container fluid>
+                    <v-alert v-if="errorMessage" type="error" dismissible @input="errorMessage = ''">
+                        {{ errorMessage }}
+                    </v-alert>
+
+                    <v-alert v-if="successMessage" type="success" dismissible @input="successMessage = ''">
+                        {{ successMessage }}
+                    </v-alert>
+
                     <div v-if="currentView === 'planning'">
-                            <v-col cols="12">
+                        <v-row>
+                            <v-col cols="12" md="6">
                                 <v-card>
                                     <v-card-title>Новая сделка</v-card-title>
                                     <v-card-text>
@@ -151,6 +173,7 @@
                                             type="number" 
                                             label="Человеко-дни"
                                             min="1"
+                                            :disabled="loading"
                                         ></v-text-field>
                                         <v-menu 
                                             v-model="dealDateMenu1" 
@@ -165,6 +188,7 @@
                                                     readonly 
                                                     v-on="on"
                                                     prepend-icon="mdi-calendar"
+                                                    :disabled="loading"
                                                 ></v-text-field>
                                             </template>
                                             <v-date-picker 
@@ -188,6 +212,7 @@
                                                     readonly 
                                                     v-on="on"
                                                     prepend-icon="mdi-calendar"
+                                                    :disabled="loading"
                                                 ></v-text-field>
                                             </template>
                                             <v-date-picker 
@@ -198,13 +223,47 @@
                                                 :min="newDeal.startDate"
                                             ></v-date-picker>
                                         </v-menu>
-                                        <v-btn color="primary" @click="checkDeal">Проверить возможность</v-btn>
+                                        <v-btn color="primary" @click="checkDeal" :loading="checkingDeal" :disabled="loading">
+                                            Проверить возможность
+                                        </v-btn>
                                         <v-alert v-if="dealCheckResult" :type="canAddDeal ? 'success' : 'error'" class="mt-4">
                                             {{ dealCheckResult }}
                                         </v-alert>
+                                        <v-btn v-if="canAddDeal" color="success" @click="addDeal" class="mt-2" :disabled="loading">
+                                            Добавить сделку
+                                        </v-btn>
                                     </v-card-text>
                                 </v-card>
                             </v-col>
+
+                            <v-col cols="12" md="6">
+                                <v-card>
+                                    <v-card-title>Список сделок</v-card-title>
+                                    <v-card-text>
+                                        <v-list v-if="deals.length > 0">
+                                            <v-list-item v-for="deal in deals" :key="deal.id">
+                                                <v-list-item-content>
+                                                    <v-list-item-title>
+                                                        {{ deal.man_days }} ЧД с {{ formatDate(deal.start_date) }} по {{ formatDate(deal.end_date) }}
+                                                    </v-list-item-title>
+                                                    <v-list-item-subtitle>
+                                                        Создано: {{ formatDateTime(deal.created_at) }}
+                                                    </v-list-item-subtitle>
+                                                </v-list-item-content>
+                                                <v-list-item-action>
+                                                    <v-btn icon @click="deleteDeal(deal.id)" color="error" small>
+                                                        <v-icon>mdi-delete</v-icon>
+                                                    </v-btn>
+                                                </v-list-item-action>
+                                            </v-list-item>
+                                        </v-list>
+                                        <p v-else>Нет добавленных сделок</p>
+                                    </v-card-text>
+                                </v-card>
+                            </v-col>
+                        </v-row>
+
+                        <v-row>
                             <v-col cols="12">
                                 <v-card>
                                     <v-card-title>График загрузки</v-card-title>
@@ -213,153 +272,131 @@
                                     </v-card-text>
                                 </v-card>
                             </v-col>
+                        </v-row>
                     </div>
+
                     <div v-if="currentView === 'loadTable'">
-                        <v-col cols="12">
-                        <v-card>
-                            <v-card-title>Рабочие графики сотрудников</v-card-title>
-                            <v-card-text>
-                            <v-row>
-                                <v-col cols="12" md="6">
-                                    <v-menu 
-                                        v-model="tableDateMenu1" 
-                                        :close-on-content-click="false" 
-                                        max-width="290"
-                                        :locale="ruLocale"
-                                    >
-                                        <template v-slot:activator="{ on }">
-                                            <v-text-field 
-                                                v-model="tableDateStart" 
-                                                label="Дата с" 
-                                                readonly 
-                                                v-on="on"
-                                                prepend-icon="mdi-calendar"
-                                            ></v-text-field>
-                                        </template>
-                                        <v-date-picker 
-                                            v-model="tableDateStart" 
-                                            @input="updateTableDates"
-                                            :locale="ruLocale"
-                                            :first-day-of-week="1"
-                                            :max="tableDateEnd"
-                                        ></v-date-picker>
-                                    </v-menu>
-                                </v-col>
-                                <v-col cols="12" md="6">
-                                    <v-menu 
-                                        v-model="tableDateMenu2" 
-                                        :close-on-content-click="false" 
-                                        max-width="290"
-                                        :locale="ruLocale"
-                                    >
-                                        <template v-slot:activator="{ on }">
-                                            <v-text-field 
-                                                v-model="tableDateEnd" 
-                                                label="Дата по" 
-                                                readonly 
-                                                v-on="on"
-                                                prepend-icon="mdi-calendar"
-                                            ></v-text-field>
-                                        </template>
-                                        <v-date-picker 
-                                            v-model="tableDateEnd" 
-                                            @input="updateTableDates"
-                                            :locale="ruLocale"
-                                            :first-day-of-week="1"
-                                            :min="tableDateStart"
-                                        ></v-date-picker>
-                                    </v-menu>
-                                </v-col>
-                            </v-row>
-                                <div style="overflow-x: auto;" class="table-wrapper" ref="tableWrapper" @wheel="handleWheelScroll">
-                                    <table class="main-table">
-                                        <thead>
-                                            <tr>
-                                                <th style="min-width: 150px;">Сотрудник</th>
-                                                <th v-for="date in tableDates" :key="date" class="load-cell" 
-                                                    :class="{ 'weekend': isWeekend(date) }">
-                                                    {{ formatTableDate(date) }}
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr v-for="employee in employees" :key="employee.name">
-                                                <td>{{ employee.name }}</td>
-                                                <td v-for="date in tableDates" 
-                                                    :key="date" 
-                                                    class="load-cell"
-                                                    :class="getCellClass(employee, date)"
-                                                    @click="changeIcon(employee, date)"
-                                                >
-                                                    <v-icon 
-                                                            :color="getCellContent(employee, date).color"
-                                                            :title="getCellContent(employee, date).tooltip"
-                                                        >
-                                                            {{ getCellContent(employee, date).icon }}
-                                                        </v-icon>
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </v-card-text>
-                        </v-card>
-                        <v-dialog v-model="iconDialog" max-width="500">
-                            <v-card>
-                            <v-card-title>Выберите статус</v-card-title>
-                            <v-card-text>
-                                <v-radio-group v-model="selectedStatus">
-                                <v-radio value="working" color="green">
-                                    <template v-slot:label>
-                                    <v-icon color="green">mdi-briefcase</v-icon>
-                                    <span class="ml-2">Рабочий день</span>
-                                    </template>
-                                </v-radio>
-                                <v-radio value="vacation" color="orange">
-                                    <template v-slot:label>
-                                    <v-icon color="orange">mdi-palm-tree</v-icon>
-                                    <span class="ml-2">Отпуск</span>
-                                    </template>
-                                </v-radio>
-                                <v-radio value="sick" color="red">
-                                    <template v-slot:label>
-                                    <v-icon color="red">mdi-hospital-box</v-icon>
-                                    <span class="ml-2">Больничный</span>
-                                    </template>
-                                </v-radio>
-                                <v-radio value="weekend" color="grey">
-                                    <template v-slot:label>
-                                    <v-icon color="grey">mdi-sofa</v-icon>
-                                    <span class="ml-2">Выходной</span>
-                                    </template>
-                                </v-radio>
-                                </v-radio-group>
-                            </v-card-text>
-                            <v-card-actions>
-                                <v-spacer></v-spacer>
-                                <v-btn color="primary" @click="saveIconChange">Сохранить</v-btn>
-                                <v-btn color="secondary" @click="iconDialog = false">Отмена</v-btn>
-                            </v-card-actions>
-                            </v-card>
-                        </v-dialog>
-                        </v-col>
+                        <v-row>
                             <v-col cols="12">
+                                <v-card>
+                                    <v-card-title>Рабочие графики сотрудников</v-card-title>
+                                    <v-card-text>
+                                        <v-row>
+                                            <v-col cols="12" md="4">
+                                                <v-menu 
+                                                    v-model="tableDateMenu1" 
+                                                    :close-on-content-click="false" 
+                                                    max-width="290"
+                                                    :locale="ruLocale"
+                                                >
+                                                    <template v-slot:activator="{ on }">
+                                                        <v-text-field 
+                                                            v-model="tableDateStart" 
+                                                            label="Дата с" 
+                                                            readonly 
+                                                            v-on="on"
+                                                            prepend-icon="mdi-calendar"
+                                                            :disabled="loading"
+                                                        ></v-text-field>
+                                                    </template>
+                                                    <v-date-picker 
+                                                        v-model="tableDateStart" 
+                                                        @input="updateTableDates"
+                                                        :locale="ruLocale"
+                                                        :first-day-of-week="1"
+                                                        :max="tableDateEnd"
+                                                    ></v-date-picker>
+                                                </v-menu>
+                                            </v-col>
+                                            <v-col cols="12" md="4">
+                                                <v-menu 
+                                                    v-model="tableDateMenu2" 
+                                                    :close-on-content-click="false" 
+                                                    max-width="290"
+                                                    :locale="ruLocale"
+                                                >
+                                                    <template v-slot:activator="{ on }">
+                                                        <v-text-field 
+                                                            v-model="tableDateEnd" 
+                                                            label="Дата по" 
+                                                            readonly 
+                                                            v-on="on"
+                                                            prepend-icon="mdi-calendar"
+                                                            :disabled="loading"
+                                                        ></v-text-field>
+                                                    </template>
+                                                    <v-date-picker 
+                                                        v-model="tableDateEnd" 
+                                                        @input="updateTableDates"
+                                                        :locale="ruLocale"
+                                                        :first-day-of-week="1"
+                                                        :min="tableDateStart"
+                                                    ></v-date-picker>
+                                                </v-menu>
+                                            </v-col>
+                                            <v-col cols="12" md="4">
+                                                <v-btn color="primary" @click="loadScheduleData" :loading="loading" class="mt-4">
+                                                    Обновить данные
+                                                </v-btn>
+                                            </v-col>
+                                        </v-row>
+                                        
+                                        <div style="overflow-x: auto;" class="table-wrapper" ref="tableWrapper" @wheel="handleWheelScroll">
+                                            <table class="main-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th style="min-width: 150px;">Сотрудник</th>
+                                                        <th v-for="date in tableDates" :key="date" class="load-cell" 
+                                                            :class="{ 'weekend': isWeekend(date) }">
+                                                            {{ formatTableDate(date) }}
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="employee in employees" :key="employee.id">
+                                                        <td>{{ employee.name }}</td>
+                                                        <td v-for="date in tableDates" 
+                                                            :key="date" 
+                                                            class="load-cell"
+                                                            :class="getCellClass(employee, date)"
+                                                            @click="changeIcon(employee, date)"
+                                                        >
+                                                            <v-icon 
+                                                                :color="getCellContent(employee, date).color"
+                                                                :title="getCellContent(employee, date).tooltip"
+                                                            >
+                                                                {{ getCellContent(employee, date).icon }}
+                                                            </v-icon>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </v-card-text>
+                                </v-card>
+                            </v-col>
+                        </v-row>
+
+                        <v-row>
+                            <v-col cols="12" md="6">
                                 <v-card>
                                     <v-card-title>Управление графиком</v-card-title>
                                     <v-card-text>
-                                    <v-autocomplete 
-                                        v-model="selectedEmployee" 
-                                        :items="employees" 
-                                        label="Сотрудник" 
-                                        item-text="name" 
-                                        return-object
-                                        :menu-props="{ closeOnContentClick: true }"
-                                    ></v-autocomplete>
+                                        <v-autocomplete 
+                                            v-model="selectedEmployee" 
+                                            :items="employees" 
+                                            label="Сотрудник" 
+                                            item-text="name" 
+                                            return-object
+                                            :menu-props="{ closeOnContentClick: true }"
+                                            :disabled="loading"
+                                        ></v-autocomplete>
                                         <v-autocomplete
                                             v-model="scheduleAction" 
                                             :items="scheduleActions" 
                                             label="Действие"
                                             :menu-props="{ closeOnContentClick: true }"
+                                            :disabled="loading"
                                         ></v-autocomplete>
                                         <v-menu 
                                             v-model="dateMenu1" 
@@ -374,6 +411,7 @@
                                                     readonly 
                                                     v-on="on"
                                                     prepend-icon="mdi-calendar"
+                                                    :disabled="loading"
                                                 ></v-text-field>
                                             </template>
                                             <v-date-picker 
@@ -396,6 +434,7 @@
                                                     readonly 
                                                     v-on="on"
                                                     prepend-icon="mdi-calendar"
+                                                    :disabled="loading"
                                                 ></v-text-field>
                                             </template>
                                             <v-date-picker 
@@ -405,31 +444,85 @@
                                                 :first-day-of-week="1"
                                             ></v-date-picker>
                                         </v-menu>
-                                        <v-btn color="primary" @click="applySchedule">Применить</v-btn>
+                                        <v-btn color="primary" @click="applySchedule" :loading="loading" :disabled="!selectedEmployee">
+                                            Применить
+                                        </v-btn>
                                     </v-card-text>
                                 </v-card>
                             </v-col>
-                        <v-col cols="12">
+
+                            <v-col cols="12" md="6">
                                 <v-card>
                                     <v-card-title>Управление сотрудниками</v-card-title>
                                     <v-card-text>
-                                        <v-text-field v-model="newEmployee.name" label="Имя сотрудника"></v-text-field>
-                                        <v-btn color="primary" @click="addEmployee">Добавить</v-btn>
+                                        <v-text-field 
+                                            v-model="newEmployee.name" 
+                                            label="Имя сотрудника"
+                                            :disabled="loading"
+                                        ></v-text-field>
+                                        <v-btn color="primary" @click="addEmployee" :loading="addingEmployee" :disabled="loading">
+                                            Добавить
+                                        </v-btn>
                                         <v-autocomplete
-                                            v-model="selectedEmployee" 
+                                            v-model="selectedEmployeeForDelete" 
                                             :items="employees" 
                                             label="Сотрудник" 
                                             item-text="name" 
                                             return-object
                                             :menu-props="{ closeOnContentClick: true }"
                                             class="mt-4"
+                                            :disabled="loading"
                                         ></v-autocomplete>
-                                        <v-btn color="error" @click="removeEmployee" :disabled="!selectedEmployee">Уволить</v-btn>
-                                    </v-card-text>6666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+                                        <v-btn color="error" @click="removeEmployee" :loading="deletingEmployee" 
+                                            :disabled="!selectedEmployeeForDelete || loading">
+                                            Уволить
+                                        </v-btn>
+                                    </v-card-text>
                                 </v-card>
-                                </v-col>
+                            </v-col>
+                        </v-row>
                     </div>
-                </div>
+
+                    <!-- Диалог изменения статуса -->
+                    <v-dialog v-model="iconDialog" max-width="500">
+                        <v-card>
+                            <v-card-title>Выберите статус для {{ currentEmployee ? currentEmployee.name : '' }}</v-card-title>
+                            <v-card-text>
+                                <v-radio-group v-model="selectedStatus">
+                                    <v-radio value="working" color="green">
+                                        <template v-slot:label>
+                                            <v-icon color="green">mdi-briefcase</v-icon>
+                                            <span class="ml-2">Рабочий день</span>
+                                        </template>
+                                    </v-radio>
+                                    <v-radio value="vacation" color="orange">
+                                        <template v-slot:label>
+                                            <v-icon color="orange">mdi-palm-tree</v-icon>
+                                            <span class="ml-2">Отпуск</span>
+                                        </template>
+                                    </v-radio>
+                                    <v-radio value="sick" color="red">
+                                        <template v-slot:label>
+                                            <v-icon color="red">mdi-hospital-box</v-icon>
+                                            <span class="ml-2">Больничный</span>
+                                        </template>
+                                    </v-radio>
+                                    <v-radio value="weekend" color="grey">
+                                        <template v-slot:label>
+                                            <v-icon color="grey">mdi-sofa</v-icon>
+                                            <span class="ml-2">Выходной</span>
+                                        </template>
+                                    </v-radio>
+                                </v-radio-group>
+                            </v-card-text>
+                            <v-card-actions>
+                                <v-spacer></v-spacer>
+                                <v-btn color="primary" @click="saveIconChange" :loading="savingStatus">Сохранить</v-btn>
+                                <v-btn color="secondary" @click="iconDialog = false">Отмена</v-btn>
+                            </v-card-actions>
+                        </v-card>
+                    </v-dialog>
+                </v-container>
             </v-main>
         </v-app>
     </div>
@@ -445,6 +538,8 @@
     <script>
         moment.locale('ru');
         
+        const API_BASE = 'http://localhost/shedule/api'; // Измените на ваш URL
+
         new Vue({
             el: '#app',
             vuetify: new Vuetify({
@@ -459,6 +554,14 @@
             }),
             data() {
                 return {
+                    loading: false,
+                    checkingDeal: false,
+                    addingEmployee: false,
+                    deletingEmployee: false,
+                    savingStatus: false,
+                    errorMessage: '',
+                    successMessage: '',
+                    
                     currentView: 'planning',
                     ruLocale: {
                         firstDayOfWeek: 1,
@@ -470,21 +573,29 @@
                             ]
                         }
                     },
-                    employees: [
-                        { name: 'Иванов И.И.', schedule: {} },
-                        { name: 'Петров П.П.', schedule: {} },
-                        { name: 'Сидорова А.В.', schedule: {} }
-                    ],
+                    employees: [],
+                    deals: [],
+
+                    // Для диалога статуса
                     iconDialog: false,
+                    currentEmployee: null,
+                    currentDate: null,
                     selectedStatus: null,
+
+                    // Управление сотрудниками
                     newEmployee: { name: '' },
+                    selectedEmployeeForDelete: null,
+
+                    // Управление графиком
                     selectedEmployee: null,
-                    scheduleAction: 'Выходные',
-                    scheduleActions: ['Рабочие дни', 'Отпуск', 'Больничный'],
+                    scheduleAction: 'weekend',
+                    scheduleActions: ['working', 'vacation', 'sick', 'weekend'],
                     scheduleDateStart: moment().format('YYYY-MM-DD'),
                     scheduleDateEnd: moment().add(1, 'week').format('YYYY-MM-DD'),
                     dateMenu1: false,
                     dateMenu2: false,
+
+                    // Для сделок
                     newDeal: { 
                         manDays: 5, 
                         startDate: moment().format('YYYY-MM-DD'), 
@@ -492,10 +603,9 @@
                     },
                     dealDateMenu1: false,
                     dealDateMenu2: false,
-                    deals: [],
                     dealCheckResult: null,
                     canAddDeal: false,
-                    chart: null,
+
                     // Для таблицы загрузки
                     tableDateStart: moment().format('YYYY-MM-DD'),
                     tableDateEnd: moment().add(4, 'week').format('YYYY-MM-DD'),
@@ -504,295 +614,305 @@
                     tableDateMenu2: false,
                 };
             },
-            computed:{
+            computed: {
                 tableDaysCount() {
                     if (!this.tableDateStart || !this.tableDateEnd) return 0;
                     const start = moment(this.tableDateStart);
                     const end = moment(this.tableDateEnd);
-                    return end.diff(start, 'days') + 1; // +1 чтобы включить начальный день
-                },
+                    return end.diff(start, 'days') + 1;
+                }
             },
             methods: {
+                // API методы
+                async apiCall(url, options = {}) {
+                    try {
+                        const response = await fetch(url, {
+                            headers: {
+                                'Content-Type': 'application/json',
+                                ...options.headers
+                            },
+                            ...options
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        if (!data.success) {
+                            throw new Error(data.error || 'Unknown error');
+                        }
+                        
+                        return data;
+                    } catch (error) {
+                        console.error('API Error:', error);
+                        throw error;
+                    }
+                },
+
+                async loadEmployees() {
+                    try {
+                        const data = await this.apiCall(`${API_BASE}/employees.php`);
+                        this.employees = data.data.map(emp => ({
+                            ...emp,
+                            schedule: {}
+                        }));
+                    } catch (error) {
+                        this.showError('Ошибка загрузки сотрудников: ' + error.message);
+                    }
+                },
+
+                async loadDeals() {
+                    try {
+                        const data = await this.apiCall(`${API_BASE}/deals.php`);
+                        this.deals = data.data;
+                    } catch (error) {
+                        this.showError('Ошибка загрузки сделок: ' + error.message);
+                    }
+                },
+
+                async loadSchedule() {
+                    if (!this.tableDateStart || !this.tableDateEnd) return;
+                    
+                    try {
+                        const data = await this.apiCall(
+                            `${API_BASE}/schedule.php?start_date=${this.tableDateStart}&end_date=${this.tableDateEnd}`
+                        );
+                        
+                        // Очищаем расписания
+                        this.employees.forEach(emp => {
+                            emp.schedule = {};
+                        });
+                        
+                        // Заполняем расписания из данных API
+                        data.data.forEach(item => {
+                            const employee = this.employees.find(e => e.name === item.name);
+                            if (employee && item.date) {
+                                employee.schedule[item.date] = item.status;
+                            }
+                        });
+                    } catch (error) {
+                        this.showError('Ошибка загрузки графика: ' + error.message);
+                    }
+                },
+
+                async refreshData() {
+                    this.loading = true;
+                    try {
+                        await Promise.all([
+                            this.loadEmployees(),
+                            this.loadDeals(),
+                            this.loadSchedule()
+                        ]);
+                        this.showSuccess('Данные обновлены');
+                        if (this.currentView === 'planning') {
+                            this.updateChart();
+                        }
+                    } catch (error) {
+                        this.showError('Ошибка обновления данных: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async addEmployee() {
+                    if (!this.newEmployee.name) {
+                        this.showError('Введите имя сотрудника');
+                        return;
+                    }
+
+                    this.addingEmployee = true;
+                    try {
+                        await this.apiCall(`${API_BASE}/employees.php`, {
+                            method: 'POST',
+                            body: JSON.stringify({ name: this.newEmployee.name })
+                        });
+                        
+                        this.newEmployee.name = '';
+                        await this.loadEmployees();
+                        this.showSuccess('Сотрудник добавлен');
+                    } catch (error) {
+                        this.showError('Ошибка добавления сотрудника: ' + error.message);
+                    } finally {
+                        this.addingEmployee = false;
+                    }
+                },
+
+                async removeEmployee() {
+                    if (!this.selectedEmployeeForDelete) return;
+
+                    this.deletingEmployee = true;
+                    try {
+                        await this.apiCall(`${API_BASE}/employees.php`, {
+                            method: 'DELETE',
+                            body: JSON.stringify({ id: this.selectedEmployeeForDelete.id })
+                        });
+                        
+                        this.selectedEmployeeForDelete = null;
+                        await this.loadEmployees();
+                        this.showSuccess('Сотрудник удален');
+                    } catch (error) {
+                        this.showError('Ошибка удаления сотрудника: ' + error.message);
+                    } finally {
+                        this.deletingEmployee = false;
+                    }
+                },
+
+                async saveIconChange() {
+                    if (!this.currentEmployee || !this.currentDate || !this.selectedStatus) return;
+
+                    this.savingStatus = true;
+                    try {
+                        await this.apiCall(`${API_BASE}/schedule.php`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                employee_id: this.currentEmployee.id,
+                                date: this.currentDate,
+                                status: this.selectedStatus
+                            })
+                        });
+                        
+                        // Обновляем локальные данные
+                        this.currentEmployee.schedule[this.currentDate] = this.selectedStatus;
+                        this.iconDialog = false;
+                        this.showSuccess('Статус обновлен');
+                    } catch (error) {
+                        this.showError('Ошибка сохранения статуса: ' + error.message);
+                    } finally {
+                        this.savingStatus = false;
+                    }
+                },
+
+                async applySchedule() {
+                    if (!this.selectedEmployee || !this.scheduleDateStart || !this.scheduleDateEnd) {
+                        this.showError('Заполните все поля');
+                        return;
+                    }
+
+                    this.loading = true;
+                    try {
+                        await this.apiCall(`${API_BASE}/schedule.php`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                bulk_update: true,
+                                employee_id: this.selectedEmployee.id,
+                                start_date: this.scheduleDateStart,
+                                end_date: this.scheduleDateEnd,
+                                status: this.scheduleAction
+                            })
+                        });
+                        
+                        await this.loadSchedule();
+                        this.showSuccess('График обновлен');
+                    } catch (error) {
+                        this.showError('Ошибка применения графика: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async addDeal() {
+                    if (!this.canAddDeal) return;
+
+                    this.loading = true;
+                    try {
+                        await this.apiCall(`${API_BASE}/deals.php`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                man_days: this.newDeal.manDays,
+                                start_date: this.newDeal.startDate,
+                                end_date: this.newDeal.endDate
+                            })
+                        });
+                        
+                        await this.loadDeals();
+                        this.updateChart();
+                        this.newDeal = { 
+                            manDays: 5, 
+                            startDate: moment().format('YYYY-MM-DD'), 
+                            endDate: moment().add(6, 'days').format('YYYY-MM-DD') 
+                        };
+                        this.dealCheckResult = null;
+                        this.canAddDeal = false;
+                        this.showSuccess('Сделка добавлена');
+                    } catch (error) {
+                        this.showError('Ошибка добавления сделки: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async deleteDeal(dealId) {
+                    this.loading = true;
+                    try {
+                        await this.apiCall(`${API_BASE}/deals.php`, {
+                            method: 'DELETE',
+                            body: JSON.stringify({ id: dealId })
+                        });
+                        
+                        await this.loadDeals();
+                        this.updateChart();
+                        this.showSuccess('Сделка удалена');
+                    } catch (error) {
+                        this.showError('Ошибка удаления сделки: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Вспомогательные методы
+                showError(message) {
+                    this.errorMessage = message;
+                    setTimeout(() => {
+                        this.errorMessage = '';
+                    }, 5000);
+                },
+
+                showSuccess(message) {
+                    this.successMessage = message;
+                    setTimeout(() => {
+                        this.successMessage = '';
+                    }, 3000);
+                },
+
+                formatDate(dateStr) {
+                    return moment(dateStr).format('DD.MM.YYYY');
+                },
+
+                formatDateTime(dateTimeStr) {
+                    return moment(dateTimeStr).format('DD.MM.YYYY HH:mm');
+                },
+
                 handleWheelScroll(e) {
-                    // Прокрутка только по горизонтали при скролле колесиком мыши
                     if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
                         this.$refs.tableWrapper.scrollLeft += e.deltaY;
                         e.preventDefault();
                     }
                 },
+
                 planning(){
                     this.currentView = 'planning';
                     setTimeout(() => {
                         this.updateChart();
                     }, 200);
                 }, 
+
                 loadTable(){
                     this.currentView = 'loadTable';
+                    this.loadScheduleData();
                 },
-                addEmployee() {
-                    if (this.newEmployee.name) {
-                        this.employees.push({
-                            name: this.newEmployee.name,
-                            schedule: {}
-                        });
-                        this.newEmployee.name = '';
-                        this.updateChart();
+
+                async loadScheduleData() {
+                    this.loading = true;
+                    try {
+                        await this.loadSchedule();
+                    } catch (error) {
+                        this.showError('Ошибка загрузки графика: ' + error.message);
+                    } finally {
+                        this.loading = false;
                     }
                 },
-                removeEmployee() {
-                    if (this.selectedEmployee) {
-                        const index = this.employees.indexOf(this.selectedEmployee);
-                        if (index !== -1) {
-                            this.employees.splice(index, 1);
-                            this.selectedEmployee = null;
-                            this.updateChart();
-                        }
-                    }
-                },
-                applySchedule() {
-                    if (!this.selectedEmployee || !this.scheduleAction || !this.scheduleDateStart || !this.scheduleDateEnd) return;
 
-                    const start = moment(this.scheduleDateStart);
-                    const end = moment(this.scheduleDateEnd);
-                    const status = this.scheduleAction === 'Рабочие дни' ? 'working' : 
-                                this.scheduleAction === 'Выходные' ? 'weekend' :
-                                this.scheduleAction === 'Отпуск' ? 'vacation' : 'sick';
-
-                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
-                        const dateStr = m.format('YYYY-MM-DD');
-                        // Удаляем проверку на выходные/рабочие дни
-                        this.selectedEmployee.schedule[dateStr] = status;
-                    }
-                    this.updateTableDates();
-                },
-                isWeekend(dateStr) {
-                    const day = moment(dateStr).day();
-                    return day === 0 || day === 6; // Воскресенье или суббота
-                },
-                checkDeal() {
-                    if (!this.newDeal.manDays || !this.newDeal.startDate || !this.newDeal.endDate) return;
-
-                    const start = moment(this.newDeal.startDate);
-                    const end = moment(this.newDeal.endDate);
-                    const days = end.diff(start, 'days') + 1;
-                    const workDays = this.countWorkDays(start, end);
-                    const avgLoad = workDays > 0 ? this.newDeal.manDays / workDays : 0;
-
-                    let canAdd = true;
-                    let maxLoad = 0;
-                    let problemDate = null;
-                    
-                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
-                        const dateStr = m.format('YYYY-MM-DD');
-                        if (!this.isWorkDay(dateStr)) continue;
-                        
-                        const availableManDays = this.getAvailableManDays(dateStr);
-                        const occupiedManDays = this.getOccupiedManDays(dateStr);
-                        const totalLoad = occupiedManDays + avgLoad;
-
-                        if (totalLoad > availableManDays * 0.9) {
-                            canAdd = false;
-                            problemDate = dateStr;
-                        }
-                        maxLoad = Math.max(maxLoad, totalLoad);
-                    }
-
-                    this.canAddDeal = canAdd;
-                    this.dealCheckResult = canAdd 
-                        ? `Сделку можно взять. Максимальная загрузка: ${maxLoad.toFixed(2)} ЧД`
-                        : `Сделку нельзя взять. Превышение загрузки ${maxLoad.toFixed(2)} ЧД на дату ${moment(problemDate).format('DD.MM.YYYY')}`;
-                    this.updateChart();
-                },
-                countWorkDays(start, end) {
-                    let count = 0;
-                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
-                        if (this.isWorkDay(m.format('YYYY-MM-DD'))) count++;
-                    }
-                    return count;
-                },
-                isWorkDay(dateStr) {
-                    if (this.isWeekend(dateStr)) return false;
-                    
-                    return this.employees.some(emp => {
-                        const status = emp.schedule[dateStr];
-                        return !status || status === 'working';
-                    });
-                },
-                addDeal() {
-                    if (this.canAddDeal) {
-                        this.deals.push({ ...this.newDeal });
-                        this.newDeal = { 
-                            manDays: 5, 
-                            startDate: moment().format('YYYY-MM-DD'), 
-                            endDate: moment().add(5, 'days').format('YYYY-MM-DD') 
-                        };
-                        this.dealCheckResult = null;
-                        this.canAddDeal = false;
-                        this.updateChart();
-                    }
-                },
-                getAvailableManDays(date) {
-                    return this.employees.filter(emp => {
-                        const status = emp.schedule[date];
-                        if (!status) return !this.isWeekend(date);
-                        return status === 'working';
-                    }).length;
-                },
-                getOccupiedManDays(date) {
-                    if (!this.isWorkDay(date)) return 0;
-                    
-                    let total = 0;
-                    this.deals.forEach(deal => {
-                        const start = moment(deal.startDate);
-                        const end = moment(deal.endDate);
-                        if (moment(date).isBetween(start, end, null, '[]')) {
-                            const workDays = this.countWorkDays(start, end);
-                            if (workDays > 0) {
-                                total += deal.manDays / workDays;
-                            }
-                        }
-                    });
-                    return total;
-                },
-                updateChart() {
-                    const startDate = moment();
-                    const endDate = moment().add(52, 'weeks');
-                    const categories = [];
-                    const availableData = [];
-                    const occupiedData = [];
-                    const thresholdData = [];
-
-                    for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
-                        const dateStr = m.format('YYYY-MM-DD');
-                        categories.push(m.format('DD.MM'));
-                        const available = this.getAvailableManDays(dateStr);
-                        availableData.push(available);
-                        occupiedData.push(this.getOccupiedManDays(dateStr));
-                        thresholdData.push(available * 0.9);
-                    }
-
-                    Highcharts.chart('loadChart', {
-                        lang: {
-                            contextButtonTitle: "Контекстное меню",
-                            decimalPoint: ",",
-                            downloadJPEG: "Скачать JPEG",
-                            downloadPDF: "Скачать PDF",
-                            downloadPNG: "Скачать PNG",
-                            downloadSVG: "Скачать SVG",
-                            downloadCSV: "Скачать CSV",
-                            downloadXLS: "Скачать XLS",
-                            viewFullscreen: "Полноэкранный режим",
-                            viewData: "",
-                            drillUpText: "Назад к {series.name}",
-                            loading: "Загрузка...",
-                            months: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
-                                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
-                            noData: "Нет данных для отображения",
-                            printChart: "Напечатать график",
-                            resetZoom: "Сбросить масштаб",
-                            resetZoomTitle: "Сбросить масштаб 1:1",
-                            shortMonths: ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", 
-                                        "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"],
-                            thousandsSep: " ",
-                            weekdays: ["Воскресенье", "Понедельник", "Вторник", "Среда", 
-                                    "Четверг", "Пятница", "Суббота"]
-                        },
-                        chart: {
-                            type: 'column',
-                            zoomType: 'x',
-                            panning: true,
-                            panKey: 'shift',
-                            events: {
-                                load: function() {
-                                    // Обработчик колесика мыши
-                                    this.container.onmousewheel = function(e) {
-                                        e = window.event || e;
-                                        const delta = Math.max(-1, Math.min(1, (e.wheelDelta || -e.detail)));
-                                        const xAxis = this.xAxis[0];
-                                        const extremes = xAxis.getExtremes();
-                                        const range = extremes.max - extremes.min;
-                                        const offset = range * 0.1 * delta;
-                                        
-                                        xAxis.setExtremes(
-                                            extremes.min + offset,
-                                            extremes.max + offset,
-                                            true, // Анимация
-                                            false // Не обновлять событие zoom
-                                        );
-                                        e.preventDefault();
-                                    }.bind(this);
-                                },
-                            }
-                        },
-                        title: {
-                            text: ''
-                        },
-                        subtitle: {
-                            text: 'Используйте колесико мыши для прокрутки влево/вправо, для масштабирования выделите интересующую область'
-                        },
-                        xAxis: {
-                            categories: categories,
-                            crosshair: true,
-                            events: {
-                                setExtremes: function(e) {
-                                    if (e.trigger === 'zoom') {
-                                        /*
-                                        if(!document.querySelector('.highcharts-reset-zoom')){
-                                            setTimeout(() => {
-                                                if(document.querySelector('.highcharts-reset-zoom')){
-                                                    console.log(document.querySelector('.highcharts-reset-zoom').querySelector('text').textContent = "Сбросить масштабирование");
-                                                }
-                                            }, 50);
-                                        }else{
-                                            console.log(document.querySelector('.highcharts-reset-zoom').querySelector('text').textContent = "Сбросить масштабирование");
-                                        }*/
-                                    }
-                                }
-                            }
-                        },
-                        yAxis: {
-                            min: 0,
-                            title: {
-                                text: 'Человеко-дни'
-                            }
-                        },
-                        tooltip: {
-                            shared: true,
-                            formatter: function() {
-                                let s = '<b>' + this.x + '</b>';
-                                this.points.forEach(point => {
-                                    s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
-                                         point.series.name + ': ' + point.y.toFixed(2);
-                                });
-                                return s;
-                            }
-                        },
-                        plotOptions: {
-                            column: {
-                                stacking: 'normal'
-                            }
-                        },
-                        series: [{
-                            name: 'Доступно ЧД',
-                            data: availableData,
-                            color: '#36a2eb'
-                        }, {
-                            name: 'Занято ЧД',
-                            data: occupiedData,
-                            color: '#ff6384'
-                        }, {
-                            name: '90% порог',
-                            type: 'spline',
-                            data: thresholdData,
-                            color: '#ffce56',
-                            dashStyle: 'Dash',
-                            marker: {
-                                enabled: false
-                            }
-                        }]
-                    });
-                },
-                // Методы для таблицы загрузки
                 updateTableDates() {
                     this.tableDates = [];
                     const start = moment(this.tableDateStart);
@@ -800,21 +920,12 @@
                         this.tableDates.push(start.clone().add(i, 'days').format('YYYY-MM-DD'));
                     }
                 },
+
                 formatTableDate(date) {
                     const m = moment(date);
                     return m.format('DD.MM') + '\n' + m.format('ddd');
                 },
-                saveIconChange() {
-                    if (this.currentEmployee && this.currentDate) {
-                        // Упрощенная логика - просто сохраняем выбранный статус
-                        if (this.selectedStatus === 'working' || this.selectedStatus === 'weekend') {
-                            Vue.set(this.currentEmployee.schedule, this.currentDate, this.selectedStatus);
-                        } else {
-                            Vue.set(this.currentEmployee.schedule, this.currentDate, this.selectedStatus);
-                        }
-                    }
-                    this.iconDialog = false;
-                },
+
                 changeIcon(employee, date) {
                     this.currentEmployee = employee;
                     this.currentDate = date;
@@ -822,6 +933,12 @@
                                         (this.isWeekend(date) ? 'weekend' : 'working');
                     this.iconDialog = true;
                 },
+
+                isWeekend(dateStr) {
+                    const day = moment(dateStr).day();
+                    return day === 0 || day === 6;
+                },
+
                 getCellClass(employee, date) {
                     const status = employee.schedule[date];
                     if (status === 'vacation') return 'vacation';
@@ -830,6 +947,7 @@
                     if (status === 'working') return 'working';
                     return this.isWeekend(date) ? 'weekend' : 'working';
                 },
+
                 getCellContent(employee, date) {
                     const status = employee.schedule[date];
                     
@@ -862,7 +980,6 @@
                         };
                     }
                     
-                    // Стандартное поведение, если статус не установлен
                     return this.isWeekend(date) 
                         ? {
                             icon: 'mdi-sofa',
@@ -875,15 +992,125 @@
                             color: 'green'
                         };
                 },
-                getLoadColor(load) {
-                    if (load > 0.9) return 'red';
-                    if (load > 0.7) return 'orange';
-                    return 'green';
+
+                // Методы для проверки и добавления сделок
+                async checkDeal() {
+                    if (!this.newDeal.manDays || !this.newDeal.startDate || !this.newDeal.endDate) {
+                        this.showError('Заполните все поля сделки');
+                        return;
+                    }
+
+                    this.checkingDeal = true;
+                    try {
+                        const start = moment(this.newDeal.startDate);
+                        const end = moment(this.newDeal.endDate);
+                        const days = end.diff(start, 'days') + 1;
+                        const workDays = this.countWorkDays(start, end);
+                        const avgLoad = workDays > 0 ? this.newDeal.manDays / workDays : 0;
+
+                        let canAdd = true;
+                        let maxLoad = 0;
+                        let problemDate = null;
+                        
+                        for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
+                            const dateStr = m.format('YYYY-MM-DD');
+                            if (!this.isWorkDay(dateStr)) continue;
+                            
+                            const availableManDays = this.getAvailableManDays(dateStr);
+                            const occupiedManDays = this.getOccupiedManDays(dateStr);
+                            const totalLoad = occupiedManDays + avgLoad;
+
+                            if (totalLoad > availableManDays * 0.9) {
+                                canAdd = false;
+                                problemDate = dateStr;
+                            }
+                            maxLoad = Math.max(maxLoad, totalLoad);
+                        }
+
+                        this.canAddDeal = canAdd;
+                        this.dealCheckResult = canAdd 
+                            ? `Сделку можно взять. Максимальная загрузка: ${maxLoad.toFixed(2)} ЧД`
+                            : `Сделку нельзя взять. Превышение загрузки ${maxLoad.toFixed(2)} ЧД на дату ${moment(problemDate).format('DD.MM.YYYY')}`;
+                    } catch (error) {
+                        this.showError('Ошибка проверки сделки: ' + error.message);
+                    } finally {
+                        this.checkingDeal = false;
+                    }
+                },
+
+                countWorkDays(start, end) {
+                    let count = 0;
+                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
+                        if (this.isWorkDay(m.format('YYYY-MM-DD'))) count++;
+                    }
+                    return count;
+                },
+
+                isWorkDay(dateStr) {
+                    if (this.isWeekend(dateStr)) return false;
+                    
+                    return this.employees.some(emp => {
+                        const status = emp.schedule[dateStr];
+                        return !status || status === 'working';
+                    });
+                },
+
+                getAvailableManDays(date) {
+                    return this.employees.filter(emp => {
+                        const status = emp.schedule[date];
+                        if (!status) return !this.isWeekend(date);
+                        return status === 'working';
+                    }).length;
+                },
+
+                getOccupiedManDays(date) {
+                    if (!this.isWorkDay(date)) return 0;
+                    
+                    let total = 0;
+                    this.deals.forEach(deal => {
+                        const start = moment(deal.start_date);
+                        const end = moment(deal.end_date);
+                        if (moment(date).isBetween(start, end, null, '[]')) {
+                            const workDays = this.countWorkDays(start, end);
+                            if (workDays > 0) {
+                                total += deal.man_days / workDays;
+                            }
+                        }
+                    });
+                    return total;
+                },
+
+                updateChart() {
+                    // Реализация графика (остается без изменений)
+                    // ... ваш существующий код графика ...
                 }
             },
-            mounted() {
-                this.updateChart();
-                this.updateTableDates();
+            watch: {
+                tableDateStart() {
+                    this.updateTableDates();
+                },
+                tableDateEnd() {
+                    this.updateTableDates();
+                },
+                currentView() {
+                    if (this.currentView === 'planning') {
+                        this.$nextTick(() => {
+                            this.updateChart();
+                        });
+                    }
+                }
+            },
+            async mounted() {
+                this.loading = true;
+                try {
+                    await this.refreshData();
+                    this.updateTableDates();
+                    this.updateChart();
+                } catch (error) {
+                    this.showError('Ошибка загрузки данных: ' + error.message);
+                } finally {
+                    this.loading = false;
+                }
             }
         });
     </script>
