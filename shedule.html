@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.x/css/materialdesignicons.min.css" rel="stylesheet">
     <style>
+        /* Стили остаются без изменений */
         .wrapper {
             margin: 0.5rem 0;
         }
@@ -235,32 +236,6 @@
                                     </v-card-text>
                                 </v-card>
                             </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-card>
-                                    <v-card-title>Список сделок</v-card-title>
-                                    <v-card-text>
-                                        <v-list v-if="deals.length > 0">
-                                            <v-list-item v-for="deal in deals" :key="deal.id">
-                                                <v-list-item-content>
-                                                    <v-list-item-title>
-                                                        {{ deal.man_days }} ЧД с {{ formatDate(deal.start_date) }} по {{ formatDate(deal.end_date) }}
-                                                    </v-list-item-title>
-                                                    <v-list-item-subtitle>
-                                                        Создано: {{ formatDateTime(deal.created_at) }}
-                                                    </v-list-item-subtitle>
-                                                </v-list-item-content>
-                                                <v-list-item-action>
-                                                    <v-btn icon @click="deleteDeal(deal.id)" color="error" small>
-                                                        <v-icon>mdi-delete</v-icon>
-                                                    </v-btn>
-                                                </v-list-item-action>
-                                            </v-list-item>
-                                        </v-list>
-                                        <p v-else>Нет добавленных сделок</p>
-                                    </v-card-text>
-                                </v-card>
-                            </v-col>
                         </v-row>
 
                         <v-row>
@@ -393,7 +368,9 @@
                                         ></v-autocomplete>
                                         <v-autocomplete
                                             v-model="scheduleAction" 
-                                            :items="scheduleActions" 
+                                            :items="scheduleActions"
+                                            item-title="text"
+                                            item-value="value"
                                             label="Действие"
                                             :menu-props="{ closeOnContentClick: true }"
                                             :disabled="loading"
@@ -480,6 +457,29 @@
                                     </v-card-text>
                                 </v-card>
                             </v-col>
+                            <v-col cols="12" md="6">
+                                <v-card>
+                                    <v-card-title>Производственный календарь</v-card-title>
+                                    <v-card-text>
+                                        <v-select
+                                            v-model="currentYear"
+                                            :items="[2023, 2024, 2025, 2026]"
+                                            label="Год"
+                                            @change="loadProductionCalendar"
+                                            :disabled="loading"
+                                        ></v-select>
+                                        <v-btn color="primary" @click="refreshProductionCalendar" :loading="loadingCalendar">
+                                            Обновить календарь
+                                        </v-btn>
+                                        <v-btn color="secondary" @click="applyCalendarToAll" :loading="applyingCalendar" class="ml-2">
+                                            Применить ко всем
+                                        </v-btn>
+                                        <v-alert type="info" class="mt-2">
+                                            Текущий год: {{ currentYear }}, загружено дней: {{ productionCalendar.length }}
+                                        </v-alert>
+                                    </v-card-text>
+                                </v-card>
+                            </v-col>
                         </v-row>
                     </div>
 
@@ -535,10 +535,11 @@
     <script src="https://code.highcharts.com/modules/export-data.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/locale/ru.js"></script>
-    <script>
+    <script src="//api.bitrix24.com/api/v1/"></script>
+    <script type="module">
         moment.locale('ru');
-        
-        const API_BASE = 'http://localhost/shedule/api'; // Измените на ваш URL
+        import { callApi } from "./src/functions/callApi";
+        const API_BASE = 'https://5648299-ej74484.twc1.net/shedule/api/'; // Измените на ваш URL
 
         new Vue({
             el: '#app',
@@ -554,14 +555,18 @@
             }),
             data() {
                 return {
+                    applyProductionCalendar: false,
                     loading: false,
+                    loadingCalendar: false,
+                    applyingCalendar: false,
                     checkingDeal: false,
                     addingEmployee: false,
                     deletingEmployee: false,
                     savingStatus: false,
                     errorMessage: '',
                     successMessage: '',
-                    
+                    productionCalendar: [],
+                    currentYear: new Date().getFullYear(),
                     currentView: 'planning',
                     ruLocale: {
                         firstDayOfWeek: 1,
@@ -589,7 +594,13 @@
                     // Управление графиком
                     selectedEmployee: null,
                     scheduleAction: 'weekend',
-                    scheduleActions: ['working', 'vacation', 'sick', 'weekend'],
+                    scheduleActions: [
+                        { text: 'Рабочий день', value: 'working' },
+                        { text: 'Отпуск', value: 'vacation' },
+                        { text: 'Больничный', value: 'sick' },
+                        { text: 'Выходной', value: 'weekend' },
+                        { text: 'По производственному календарю', value: 'production_calendar' }
+                    ],
                     scheduleDateStart: moment().format('YYYY-MM-DD'),
                     scheduleDateEnd: moment().add(1, 'week').format('YYYY-MM-DD'),
                     dateMenu1: false,
@@ -608,7 +619,7 @@
 
                     // Для таблицы загрузки
                     tableDateStart: moment().format('YYYY-MM-DD'),
-                    tableDateEnd: moment().add(4, 'week').format('YYYY-MM-DD'),
+                    tableDateEnd: moment().add(14, 'week').format('YYYY-MM-DD'),
                     tableDates: [],
                     tableDateMenu1: false,
                     tableDateMenu2: false,
@@ -664,8 +675,7 @@
 
                 async loadDeals() {
                     try {
-                        const data = await this.apiCall(`${API_BASE}/deals.php`);
-                        this.deals = data.data;
+                        this.deals = await callApi("crm.deal.list", {"!UF_CRM_1755511210978": "null", "!UF_CRM_1755511228885": "null", "!UF_CRM_1755511268203": "null"}, ["ID", "UF_CRM_1755511210978", "UF_CRM_1755511228885", "UF_CRM_1755511268203"]);
                     } catch (error) {
                         this.showError('Ошибка загрузки сделок: ' + error.message);
                     }
@@ -784,26 +794,38 @@
                 },
 
                 async applySchedule() {
-                    if (!this.selectedEmployee || !this.scheduleDateStart || !this.scheduleDateEnd) {
-                        this.showError('Заполните все поля');
+                    if (!this.selectedEmployee) {
+                        this.showError('Выберите сотрудника');
                         return;
                     }
 
                     this.loading = true;
                     try {
-                        await this.apiCall(`${API_BASE}/schedule.php`, {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                bulk_update: true,
-                                employee_id: this.selectedEmployee.id,
-                                start_date: this.scheduleDateStart,
-                                end_date: this.scheduleDateEnd,
-                                status: this.scheduleAction
-                            })
-                        });
+                        if (this.scheduleAction === 'production_calendar') {
+                            // Применяем производственный календарь для выбранного сотрудника
+                            await this.applyCalendarToEmployee(this.selectedEmployee);
+                        } else {
+                            // Стандартная логика применения графика
+                            if (!this.scheduleDateStart || !this.scheduleDateEnd) {
+                                this.showError('Заполните все поля');
+                                return;
+                            }
+
+                            await this.apiCall(`${API_BASE}/schedule.php`, {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    bulk_update: true,
+                                    employee_id: this.selectedEmployee.id,
+                                    start_date: this.scheduleDateStart,
+                                    end_date: this.scheduleDateEnd,
+                                    status: this.scheduleAction
+                                })
+                            });
+                        }
                         
                         await this.loadSchedule();
                         this.showSuccess('График обновлен');
+                        
                     } catch (error) {
                         this.showError('Ошибка применения графика: ' + error.message);
                     } finally {
@@ -933,12 +955,6 @@
                                         (this.isWeekend(date) ? 'weekend' : 'working');
                     this.iconDialog = true;
                 },
-
-                isWeekend(dateStr) {
-                    const day = moment(dateStr).day();
-                    return day === 0 || day === 6;
-                },
-
                 getCellClass(employee, date) {
                     const status = employee.schedule[date];
                     if (status === 'vacation') return 'vacation';
@@ -993,7 +1009,8 @@
                         };
                 },
 
-                // Методы для проверки и добавления сделок
+                // МЕТОДЫ ДЛЯ ПРАВИЛЬНОГО РАСЧЕТА ЧЕЛОВЕКО-ДНЕЙ
+                // Основной метод проверки возможности добавления сделки
                 async checkDeal() {
                     if (!this.newDeal.manDays || !this.newDeal.startDate || !this.newDeal.endDate) {
                         this.showError('Заполните все поля сделки');
@@ -1004,85 +1021,349 @@
                     try {
                         const start = moment(this.newDeal.startDate);
                         const end = moment(this.newDeal.endDate);
-                        const days = end.diff(start, 'days') + 1;
-                        const workDays = this.countWorkDays(start, end);
-                        const avgLoad = workDays > 0 ? this.newDeal.manDays / workDays : 0;
-
+                        
+                        // Рассчитываем средний коэффициент нагрузки (СКН) для целевой сделки
+                        const workDaysInDeal = this.countWorkDaysInPeriod(start, end);
+                        const averageLoad = workDaysInDeal > 0 ? this.newDeal.manDays / workDaysInDeal : 0;
+                        
                         let canAdd = true;
                         let maxLoad = 0;
                         let problemDate = null;
                         
-                        for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
-                            const dateStr = m.format('YYYY-MM-DD');
-                            if (!this.isWorkDay(dateStr)) continue;
+                        // Проверяем каждую дату в периоде сделки
+                        const currentDate = start.clone();
+                        while (currentDate.isSameOrBefore(end)) {
+                            const dateStr = currentDate.format('YYYY-MM-DD');
                             
-                            const availableManDays = this.getAvailableManDays(dateStr);
-                            const occupiedManDays = this.getOccupiedManDays(dateStr);
-                            const totalLoad = occupiedManDays + avgLoad;
-
-                            if (totalLoad > availableManDays * 0.9) {
-                                canAdd = false;
-                                problemDate = dateStr;
+                            // Пропускаем выходные дни
+                            if (this.isWeekend(dateStr)) {
+                                currentDate.add(1, 'day');
+                                continue;
                             }
-                            maxLoad = Math.max(maxLoad, totalLoad);
+                            
+                            // Получаем занятость на эту дату
+                            const occupiedLoad = await this.getOccupiedManDays(dateStr);
+                            
+                            // Доступные человеко-дни на эту дату
+                            const availableManDays = this.getAvailableManDays(dateStr);
+                            
+                            // Проверяем условие: Занято ЧД + СКН <= 90% Доступных ЧД
+                            if (occupiedLoad + averageLoad > availableManDays * 0.9) {
+                                canAdd = false;
+                                const currentLoad = (occupiedLoad + averageLoad) / availableManDays * 100;
+                                if (currentLoad > maxLoad) {
+                                    maxLoad = currentLoad;
+                                    problemDate = dateStr;
+                                }
+                            }
+                            
+                            currentDate.add(1, 'day');
                         }
-
-                        this.canAddDeal = canAdd;
-                        this.dealCheckResult = canAdd 
-                            ? `Сделку можно взять. Максимальная загрузка: ${maxLoad.toFixed(2)} ЧД`
-                            : `Сделку нельзя взять. Превышение загрузки ${maxLoad.toFixed(2)} ЧД на дату ${moment(problemDate).format('DD.MM.YYYY')}`;
+                        
+                        if (canAdd) {
+                            this.dealCheckResult = `Можно добавить сделку. Средний коэффициент нагрузки: ${averageLoad.toFixed(2)} ЧД/день`;
+                            this.canAddDeal = true;
+                        } else {
+                            this.dealCheckResult = `Нельзя добавить сделку. Максимальная нагрузка ${maxLoad.toFixed(1)}% на дату ${this.formatDate(problemDate)}`;
+                            this.canAddDeal = false;
+                        }
                     } catch (error) {
                         this.showError('Ошибка проверки сделки: ' + error.message);
+                        this.canAddDeal = false;
                     } finally {
                         this.checkingDeal = false;
                     }
                 },
 
-                countWorkDays(start, end) {
-                    let count = 0;
-                    for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
-                        if (this.isWorkDay(m.format('YYYY-MM-DD'))) count++;
-                    }
-                    return count;
-                },
-
-                isWorkDay(dateStr) {
-                    if (this.isWeekend(dateStr)) return false;
+                // Метод для расчета занятых человеко-дней на конкретную дату
+                async getOccupiedManDays(date) {
+                    let totalLoad = 0;
                     
-                    return this.employees.some(emp => {
-                        const status = emp.schedule[dateStr];
-                        return !status || status === 'working';
-                    });
+                    // Проходим по всем сделкам
+                    for (const deal of this.deals) {
+                        const dealStart = moment(deal.UF_CRM_1755511210978);
+                        const dealEnd = moment(deal.UF_CRM_1755511228885);
+                        
+                        // Если дата попадает в период сделки
+                        if (moment(date).isBetween(dealStart, dealEnd, null, '[]')) {
+                            // Считаем рабочие дни в периоде сделки
+                            const workDaysInDeal = this.countWorkDaysInPeriod(dealStart, dealEnd);
+                            
+                            if (workDaysInDeal > 0) {
+                                // Рассчитываем средний коэффициент нагрузки для этой сделки
+                                const averageLoad = deal.UF_CRM_1755511268203 / workDaysInDeal;
+                                totalLoad += averageLoad;
+                            }
+                        }
+                    }
+                    
+                    return totalLoad;
                 },
 
+                // Метод для подсчета рабочих дней в периоде (исключая выходные)
+                countWorkDaysInPeriod(start, end) {
+                    let workDays = 0;
+                    const current = start.clone();
+                    
+                    while (current.isSameOrBefore(end)) {
+                        if (!this.isWeekend(current.format('YYYY-MM-DD'))) {
+                            workDays++;
+                        }
+                        current.add(1, 'day');
+                    }
+                    
+                    return workDays;
+                },
+
+                // Метод для получения доступных человеко-дней на дату
                 getAvailableManDays(date) {
+                    // Считаем количество сотрудников, доступных для работы в эту дату
                     return this.employees.filter(emp => {
                         const status = emp.schedule[date];
-                        if (!status) return !this.isWeekend(date);
-                        return status === 'working';
+                        return !status || status === 'working';
                     }).length;
                 },
 
-                getOccupiedManDays(date) {
-                    if (!this.isWorkDay(date)) return 0;
+                // Метод для проверки является ли день выходным
+                isWeekend(date) {
+                    const dayOfWeek = moment(date).day();
+                    return dayOfWeek === 0 || dayOfWeek === 6; // 0 - воскресенье, 6 - суббота
+                },
+                async updateOccupancyData() {
+                    this.occupancyData = [];
+                    const startDate = moment();
+                    const endDate = moment().add(30, 'days'); // Показываем на 30 дней вперед
                     
-                    let total = 0;
-                    this.deals.forEach(deal => {
-                        const start = moment(deal.start_date);
-                        const end = moment(deal.end_date);
-                        if (moment(date).isBetween(start, end, null, '[]')) {
-                            const workDays = this.countWorkDays(start, end);
-                            if (workDays > 0) {
-                                total += deal.man_days / workDays;
-                            }
-                        }
-                    });
-                    return total;
+                    for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
+                        const dateStr = m.format('YYYY-MM-DD');
+                        const available = this.getAvailableManDays(dateStr);
+                        const occupied = await this.getOccupiedManDays(dateStr);
+                        const percentage = available > 0 ? (occupied / available) * 100 : 0;
+                        
+                        this.occupancyData.push({
+                            date: dateStr,
+                            available: available,
+                            occupied: occupied,
+                            percentage: percentage
+                        });
+                    }
                 },
 
-                updateChart() {
-                    // Реализация графика (остается без изменений)
-                    // ... ваш существующий код графика ...
+                getOccupancyClass(percentage) {
+                    if (percentage >= 90) return 'high-occupancy';
+                    if (percentage >= 70) return 'medium-occupancy';
+                    return 'low-occupancy';
+                },
+
+                getOccupancyStatus(percentage) {
+                    if (percentage >= 90) return 'Высокая загрузка';
+                    if (percentage >= 70) return 'Средняя загрузка';
+                    return 'Низкая загрузка';
+                },
+                // Обновление графика загрузки
+                async updateChart() {
+                    const startDate = moment();
+                    const endDate = moment().add(52, 'weeks');
+                    const categories = [];
+                    const availableData = [];
+                    const occupiedData = [];
+                    const thresholdData = [];
+
+                    // Обновляем данные занятости
+                    await this.updateOccupancyData();
+
+                    for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
+                        const dateStr = m.format('YYYY-MM-DD');
+                        categories.push(m.format('DD.MM'));
+                        
+                        // Используем предварительно рассчитанные данные
+                        const dayData = this.occupancyData.find(d => d.date === dateStr);
+                        const available = dayData ? dayData.available : this.getAvailableManDays(dateStr);
+                        const occupied = dayData ? dayData.occupied : await this.getOccupiedManDays(dateStr);
+                        
+                        availableData.push(available);
+                        occupiedData.push(occupied);
+                        thresholdData.push(available * 0.9);
+                    }
+
+                    Highcharts.chart('loadChart', {
+                        lang: {
+                            contextButtonTitle: "Контекстное меню",
+                            decimalPoint: ",",
+                            downloadJPEG: "Скачать JPEG",
+                            downloadPDF: "Скачать PDF",
+                            downloadPNG: "Скачать PNG",
+                            downloadSVG: "Скачать SVG",
+                            downloadCSV: "Скачать CSV",
+                            downloadXLS: "Скачать XLS",
+                            viewFullscreen: "Полноэкранный режим",
+                            viewData: "",
+                            drillUpText: "Назад к {series.name}",
+                            loading: "Загрузка...",
+                            months: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
+                                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
+                            noData: "Нет данных для отображения",
+                            printChart: "Напечатать график",
+                            resetZoom: "Сбросить масштаб",
+                            resetZoomTitle: "Сбросить масштаб 1:1",
+                            shortMonths: ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", 
+                                        "Июл", "Август", "Сен", "Окт", "Ноя", "Дек"],
+                            thousandsSep: " ",
+                            weekdays: ["Воскресенье", "Понедельник", "Вторник", "Среда", 
+                                    "Четверг", "Пятница", "Суббота"]
+                        },
+                        chart: {
+                            type: 'column',
+                            zoomType: 'x',
+                            panning: true,
+                            panKey: 'shift'
+                        },
+                        title: {
+                            text: 'График загрузки ресурсов'
+                        },
+                        subtitle: {
+                            text: 'Используйте колесико мыши для прокрутки влево/вправо, для масштабирования выделите интересующую область'
+                        },
+                        xAxis: {
+                            categories: categories,
+                            crosshair: true
+                        },
+                        yAxis: {
+                            min: 0,
+                            title: {
+                                text: 'Человеко-дни'
+                            }
+                        },
+                        tooltip: {
+                            shared: true,
+                            formatter: function() {
+                                let s = '<b>' + this.x + '</b>';
+                                this.points.forEach(point => {
+                                    s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
+                                         point.series.name + ': ' + point.y.toFixed(2);
+                                });
+                                return s;
+                            }
+                        },
+                        plotOptions: {
+                            column: {
+                                stacking: 'normal'
+                            }
+                        },
+                        series: [{
+                            name: 'Доступно ЧД',
+                            data: availableData,
+                            color: '#36a2eb'
+                        }, {
+                            name: 'Занято ЧД',
+                            data: occupiedData,
+                            color: '#ff6384'
+                        }, {
+                            name: '90% порог',
+                            type: 'spline',
+                            data: thresholdData,
+                            color: '#ffce56',
+                            dashStyle: 'Dash',
+                            marker: {
+                                enabled: false
+                            }
+                        }]
+                    });
+                },
+
+                // Остальные методы остаются без изменений
+                async apiCall(url, options = {}) {
+                    try {
+                        const response = await fetch(url, {
+                            headers: {
+                                'Content-Type': 'application/json',
+                                ...options.headers
+                            },
+                            ...options
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        if (!data.success) {
+                            throw new Error(data.error || 'Unknown error');
+                        }
+                        
+                        return data;
+                    } catch (error) {
+                        console.error('API Error:', error);
+                        throw error;
+                    }
+                },
+
+                // Методы для работы с производственным календарем
+                async loadProductionCalendar() {
+                    this.loadingCalendar = true;
+                    try {
+                        const response = await fetch(`https://isdayoff.ru/api/getdata?year=${this.currentYear}&delimeter=,`);
+                        const csvData = await response.text();
+                        
+                        this.productionCalendar = [];
+                        const lines = csvData.split(',');
+                        
+                        for (let month = 1; month <= 12; month++) {
+                            for (let day = 1; day <= 31; day++) {
+                                const dateStr = `${this.currentYear}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                                const date = moment(dateStr);
+                                if (date.isValid() && date.year() === this.currentYear) {
+                                    const dayIndex = date.dayOfYear() - 1;
+                                    if (dayIndex < lines.length) {
+                                        const dayType = lines[dayIndex].trim();
+                                        this.productionCalendar.push({
+                                            date: dateStr,
+                                            type: dayType === '1' ? 'weekend' : 'working',
+                                            description: dayType === '1' ? 'Выходной/праздничный' : 'Рабочий день'
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        
+                        this.showSuccess(`Производственный календарь за ${this.currentYear} год загружен`);
+                    } catch (error) {
+                        this.showError('Ошибка загрузки производственного календаря: ' + error.message);
+                    } finally {
+                        this.loadingCalendar = false;
+                    }
+                },
+
+                async refreshProductionCalendar() {
+                    await this.loadProductionCalendar();
+                },
+
+                async applyCalendarToAll() {
+                    this.applyingCalendar = true;
+                    try {
+                        for (const employee of this.employees) {
+                            await this.applyCalendarToEmployee(employee);
+                        }
+                        await this.loadSchedule();
+                        this.showSuccess('Производственный календарь применен ко всем сотрудникам');
+                    } catch (error) {
+                        this.showError('Ошибка применения календаря: ' + error.message);
+                    } finally {
+                        this.applyingCalendar = false;
+                    }
+                },
+
+                async applyCalendarToEmployee(employee) {
+                    try {
+                        await this.apiCall(`${API_BASE}schedule.php`, {
+                            method: 'DELETE',
+                            body: JSON.stringify({
+                                employee_id: employee.id,
+                            })
+                        });
+                    } catch (error) {
+                        throw error;
+                    }
                 }
             },
             watch: {
@@ -1091,26 +1372,14 @@
                 },
                 tableDateEnd() {
                     this.updateTableDates();
-                },
-                currentView() {
-                    if (this.currentView === 'planning') {
-                        this.$nextTick(() => {
-                            this.updateChart();
-                        });
-                    }
                 }
             },
             async mounted() {
-                this.loading = true;
-                try {
-                    await this.refreshData();
-                    this.updateTableDates();
-                    this.updateChart();
-                } catch (error) {
-                    this.showError('Ошибка загрузки данных: ' + error.message);
-                } finally {
-                    this.loading = false;
-                }
+                await this.refreshData();
+                this.updateTableDates();
+                
+                // Загружаем производственный календарь текущего года
+                await this.loadProductionCalendar();
             }
         });
     </script>
