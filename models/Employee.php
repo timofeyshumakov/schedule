@@ -14,6 +14,18 @@ class Employee {
         $stmt = $this->db->query("SELECT * FROM {$this->table} ORDER BY name");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
+    
+    public function getActiveEmployees() {
+        $stmt = $this->db->prepare("
+            SELECT id, name, termination_date 
+            FROM {$this->table} 
+            WHERE termination_date IS NULL 
+            ORDER BY name
+        ");
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
 
     public function create($name) {
         $stmt = $this->db->prepare("INSERT INTO {$this->table} (name) VALUES (?)");
@@ -23,6 +35,15 @@ class Employee {
     public function delete($id) {
         $stmt = $this->db->prepare("DELETE FROM {$this->table} WHERE id = ?");
         return $stmt->execute([$id]);
+    }
+
+    public function terminate($id, $terminationDate) {
+        $stmt = $this->db->prepare("
+            UPDATE {$this->table} 
+            SET termination_date = ? 
+            WHERE id = ?
+        ");
+        return $stmt->execute([$terminationDate, $id]);
     }
 
     public function getById($id) {

@@ -75,13 +75,13 @@ try {
 
             $employeeId = $data['employee_id'];
 
-            if ($schedule->deleteEmployeeRecordsForCurrentYear($employeeId)) {
+            if ($schedule->terminateEmployee($employeeId, $terminationDate)) {
                 echo json_encode([
                     'success' => true, 
-                    'message' => 'Employee records for current year deleted successfully'
+                    'message' => 'Employee terminated successfully'
                 ]);
             } else {
-                throw new Exception('Failed to delete employee records');
+                throw new Exception('Failed to terminate employee');
             }
             break;
 

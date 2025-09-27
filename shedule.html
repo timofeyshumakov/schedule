@@ -326,20 +326,22 @@
                                                 </thead>
                                                 <tbody>
                                                     <tr v-for="employee in employees" :key="employee.id">
-                                                        <td>{{ employee.name }}</td>
-                                                        <td v-for="date in tableDates" 
-                                                            :key="date" 
-                                                            class="load-cell"
-                                                            :class="getCellClass(employee, date)"
-                                                            @click="changeIcon(employee, date)"
-                                                        >
-                                                            <v-icon 
-                                                                :color="getCellContent(employee, date).color"
-                                                                :title="getCellContent(employee, date).tooltip"
+                                                        <template v-if="!employee.termination_date">
+                                                            <td>{{ employee.name }}</td>
+                                                            <td v-for="date in tableDates" 
+                                                                :key="date" 
+                                                                class="load-cell"
+                                                                :class="getCellClass(employee, date)"
+                                                                @click="changeIcon(employee, date)"
                                                             >
-                                                                {{ getCellContent(employee, date).icon }}
-                                                            </v-icon>
-                                                        </td>
+                                                                <v-icon 
+                                                                    :color="getCellContent(employee, date).color"
+                                                                    :title="getCellContent(employee, date).tooltip"
+                                                                >
+                                                                    {{ getCellContent(employee, date).icon }}
+                                                                </v-icon>
+                                                            </td>
+                                                        </template>
                                                     </tr>
                                                 </tbody>
                                             </table>
@@ -515,7 +517,7 @@
     <script type="module">
         moment.locale('ru');
         //import { callApi } from "./src/functions/callApi";
-        const API_BASE = 'https://5648299-ej74484.twc1.net/shedule/api/'; // Измените на ваш URL
+        const API_BASE =  'http://localhost/shedule/api';
 
         new Vue({
             el: '#app',
@@ -577,7 +579,7 @@
                         { text: 'Выходной', value: 'weekend' },
                         { text: 'По производственному календарю', value: 'production_calendar' }
                     ],
-                    scheduleDateStart: moment().format('YYYY-MM-DD'),
+                    scheduleDateStart: moment().format('YYYY-MM-DD'), 
                     scheduleDateEnd: moment().add(1, 'week').format('YYYY-MM-DD'),
                     dateMenu1: false,
                     dateMenu2: false,
@@ -933,9 +935,13 @@ createDefaultCalendar(year) {
 
                     this.deletingEmployee = true;
                     try {
+                        const terminationDate = moment().format('YYYY-MM-DD');
                         await this.apiCall(`${API_BASE}/employees.php`, {
                             method: 'DELETE',
-                            body: JSON.stringify({ id: this.selectedEmployeeForDelete.id })
+                            body: JSON.stringify({ 
+                                id: this.selectedEmployeeForDelete.id,
+                                termination_date: terminationDate 
+                            })
                         });
                         
                         this.selectedEmployeeForDelete = null;
@@ -1557,9 +1563,9 @@ async checkDealWithRedistribution() {
                 this.dealCheckResult = `Нельзя добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Недостаточно ресурсов в ${problemDates.length} днях. Общий дефицит: ${remainingLoad.toFixed(1)} ЧД`;
                 this.canAddDeal = false;
                 // Детализация по проблемным дням
-                problemDates.forEach(problem => {
-                    this.dealCheckResult += `\n- ${this.formatDate(problem.date)}: доступно ${problem.free.toFixed(1)} из ${problem.required.toFixed(1)} ЧД`;
-                });
+                //problemDates.forEach(problem => {
+                //    this.dealCheckResult += `\n- ${this.formatDate(problem.date)}: доступно ${problem.free.toFixed(1)} из ${problem.required.toFixed(1)} ЧД`;
+                //});
 
             }
                             await new Promise((resolve) => {
@@ -1677,8 +1683,17 @@ async getOverload(date) {
 
                 // Метод для получения доступных человеко-дней на дату
                 getAvailableManDays(date) {
+                    const dateMoment = moment(date);
                     // Считаем количество сотрудников, доступных для работы в эту дату
                     const availableCount = this.employees.filter(emp => {
+                        if (emp.created_at && moment(emp.created_at).isAfter(dateMoment, 'day')) {
+                            return false; // Сотрудник еще не был принят
+                        }
+
+                        if (emp.termination_date && moment(emp.termination_date).isBefore(dateMoment, 'day')) {
+                            return false;
+                        }
+
                         const status = emp.schedule[date];
                         
                         // Если статус явно указан как рабочий день - сотрудник доступен (даже в выходной)
@@ -1816,6 +1831,27 @@ async getOverload(date) {
                             zoomType: 'x',
                             panning: true,
                             panKey: 'shift',
+                            events: {
+                                load: function() {
+                                    // Обработчик колесика мыши
+                                    this.container.onmousewheel = function(e) {
+                                        e = window.event || e;
+                                        const delta = Math.max(-1, Math.min(1, (e.wheelDelta || -e.detail)));
+                                        const xAxis = this.xAxis[0];
+                                        const extremes = xAxis.getExtremes();
+                                        const range = extremes.max - extremes.min;
+                                        const offset = range * 0.1 * delta;
+                                        
+                                        xAxis.setExtremes(
+                                            extremes.min + offset,
+                                            extremes.max + offset,
+                                            true, // Анимация
+                                            false // Не обновлять событие zoom
+                                        );
+                                        e.preventDefault();
+                                    }.bind(this);
+                                },
+                            }
                         },
                         title: {
                             text: 'График загрузки ресурсов'

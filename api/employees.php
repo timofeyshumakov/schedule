@@ -15,10 +15,16 @@ $employee = new Employee();
 try {
     switch ($_SERVER['REQUEST_METHOD']) {
         case 'GET':
-            $employees = $employee->getAll();
+            $activeOnly = isset($_GET['active']) && $_GET['active'] === 'true';
+            
+            if ($activeOnly) {
+                $employees = $employee->getActiveEmployees();
+            } else {
+                $employees = $employee->getAll();
+            }
+            
             echo json_encode(['success' => true, 'data' => $employees]);
             break;
-
         case 'POST':
             $data = json_decode(file_get_contents('php://input'), true);
             if (!isset($data['name']) || empty($data['name'])) {
@@ -38,13 +44,14 @@ try {
                 throw new Exception('Employee ID is required');
             }
 
-            if ($employee->delete($data['id'])) {
-                echo json_encode(['success' => true, 'message' => 'Employee deleted']);
+            $terminationDate = isset($data['termination_date']) ? $data['termination_date'] : date('Y-m-d');
+            
+            if ($employee->terminate($data['id'], $terminationDate)) {
+                echo json_encode(['success' => true, 'message' => 'Employee terminated']);
             } else {
-                throw new Exception('Failed to delete employee');
+                throw new Exception('Failed to terminate employee');
             }
             break;
-
         default:
             http_response_code(405);
             echo json_encode(['success' => false, 'error' => 'Method not allowed']);

@@ -10,6 +10,18 @@ class Schedule {
         $this->db = $database->getConnection();
     }
 
+    public function terminateEmployee($employeeId, $terminationDate) {
+        $sql = "UPDATE employees 
+                SET termination_date = :termination_date 
+                WHERE id = :employee_id";
+        
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindParam(':termination_date', $terminationDate);
+        $stmt->bindParam(':employee_id', $employeeId);
+        
+        return $stmt->execute();
+    }
+
     public function getByEmployeeAndDateRange($employeeId, $startDate, $endDate) {
         $stmt = $this->db->prepare("
             SELECT date, status 
@@ -68,9 +80,10 @@ class Schedule {
 
     public function getEmployeeScheduleForPeriod($startDate, $endDate) {
         $stmt = $this->db->prepare("
-            SELECT e.name, s.date, s.status
+            SELECT e.name, s.date, s.status, e.termination_date
             FROM employees e
             LEFT JOIN schedules s ON e.id = s.employee_id AND s.date BETWEEN ? AND ?
+            WHERE e.termination_date IS NULL OR e.termination_date >= ?
             ORDER BY e.name, s.date
         ");
         $stmt->execute([$startDate, $endDate]);
@@ -80,6 +93,17 @@ class Schedule {
             $result[] = $row;
         }
         return $result;
+    }
+
+    public function getActiveEmployees() {
+        $stmt = $this->db->prepare("
+            SELECT id, name 
+            FROM employees 
+            WHERE termination_date IS NULL 
+            ORDER BY name
+        ");
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     public function deleteEmployeeRecordsForCurrentYear($employeeId) {
