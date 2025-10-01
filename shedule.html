@@ -517,7 +517,7 @@
     <script type="module">
         moment.locale('ru');
         //import { callApi } from "./src/functions/callApi";
-        const API_BASE =  'http://localhost/shedule/api';
+        const API_BASE =  "https://5648299-ej74484.twc1.net/shedule/api"; //'http://localhost/shedule/api';
 
         new Vue({
             el: '#app',
@@ -1553,14 +1553,16 @@ async checkDealWithRedistribution() {
                     day.occupied += loadToRedistribute;
                 }
             }
-            
+
+            const capacityRatio = availableManDays > 0 ? 
+                this.newDeal.manDays / availableManDays : 0;
             // Если удалось перераспределить всю нагрузку
             if (remainingLoad <= 0) {
                 this.dealCheckResult = `Можно добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableCapacity.toFixed(1)} свободных ЧД)`;
                 this.canAddDeal = true;
 
             } else {
-                this.dealCheckResult = `Нельзя добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Недостаточно ресурсов в ${problemDates.length} днях. Общий дефицит: ${remainingLoad.toFixed(1)} ЧД`;
+                this.dealCheckResult = `Нельзя добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Общий дефицит: ${remainingLoad.toFixed(1)} ЧД`;
                 this.canAddDeal = false;
                 // Детализация по проблемным дням
                 //problemDates.forEach(problem => {
@@ -1592,7 +1594,7 @@ async checkDealWithRedistribution() {
                 this.newDeal.manDays / totalAvailableCapacity : 0;
             
             if (capacityRatio <= 0.9) {
-                this.dealCheckResult = `Можно добавить сделку. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableCapacity.toFixed(1)} свободных ЧД)`;
+                this.dealCheckResult = `Можно добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableCapacity.toFixed(1)} свободных ЧД)`;
                             //this.dealCheckResult = `Можно добавить сделку. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableMinusOccupied.toFixed(1)} свободных ЧД)`;
                             await new Promise((resolve) => {
                                     BX24.callMethod(
@@ -1615,7 +1617,7 @@ async checkDealWithRedistribution() {
                                     })
                             this.canAddDeal = true;
             } else {
-                this.dealCheckResult = `Нельзя добавить сделку. Коэффициент загрузки ${(capacityRatio * 100).toFixed(1)}% превышает допустимые 90%. Требуется ${this.newDeal.manDays} ЧД, доступно ${totalAvailableCapacity.toFixed(1)} свободных ЧД`;
+                this.dealCheckResult = `Нельзя добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Коэффициент загрузки ${(capacityRatio * 100).toFixed(1)}% превышает допустимые 90%. Требуется ${this.newDeal.manDays} ЧД, доступно ${totalAvailableCapacity.toFixed(1)} свободных ЧД`;
                 this.canAddDeal = false;
             }
                             await new Promise((resolve) => {
@@ -1769,179 +1771,283 @@ async getOverload(date) {
                 },
                 handleChartWheel(e) {
                     const chartContainer = document.getElementById('chartContainer');
-                    if (chartContainer) {
-                        // Прокручиваем контейнер по горизонтали
-                        chartContainer.scrollLeft += e.deltaY;
-                        e.preventDefault(); // Предотвращаем стандартную прокрутку
+                    if (!chartContainer) return;
+                    
+                    // Получаем текущую позицию скролла и размеры
+                    const currentScrollLeft = chartContainer.scrollLeft;
+                    const scrollWidth = chartContainer.scrollWidth;
+                    const clientWidth = chartContainer.clientWidth;
+                    
+                    // Рассчитываем максимально возможную позицию скролла
+                    const maxScrollLeft = scrollWidth - clientWidth;
+                    console.log(maxScrollLeft);
+                    console.log(scrollWidth);
+                    // Определяем направление скролла
+                    const scrollDelta = e.deltaY;
+                    
+                    // Проверяем границы
+                    if ((scrollDelta > 0 && currentScrollLeft <= 0) || // Достигли начала
+                        (scrollDelta < 0 && currentScrollLeft >= maxScrollLeft)) { // Достигли конца
+                        e.preventDefault();
+                        return;
                     }
+                    
+                    // Если не достигли границ, выполняем скролл
+                    chartContainer.scrollLeft += scrollDelta;
+                    e.preventDefault();
                 },
                 // Обновление графика загрузки
-                async updateChart() {
-                    const startDate = moment();
-                    const endDate = moment().add(30, 'days');
-                    const categories = [];
-                    const availableData = [];
-                    const occupiedData = [];
-                    const freeData = [];
-                    const overloadData = [];
+async updateChart() {
+    const startDate = moment();
+    const endDate = moment().add(45, 'days');
+    const categories = [];
+    const availableData = [];
+    const occupiedData = [];
+    const freeData = [];
+    const overloadData = [];
 
-                    for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
-                        const dateStr = m.format('YYYY-MM-DD');
-                        categories.push(m.format('DD.MM.YY'));
-                        
-                        const available = this.getAvailableManDays(dateStr);
-                        const occupied = await this.getOccupiedManDays(dateStr);
-                        const free = Math.max(0, available - occupied);
-                        const overload = Math.max(0, occupied - available);
-                        
-                        availableData.push(available);
-                        occupiedData.push(occupied);
-                        freeData.push(free);
-                        overloadData.push(overload);
-                    }
+    // Создаем массив всех дат в периоде
+    const allDates = [];
+    for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
+        allDates.push(m.format('YYYY-MM-DD'));
+    }
 
-                    Highcharts.chart('loadChart', {
-                        lang: {
-                            contextButtonTitle: "Контекстное меню",
-                            decimalPoint: ",",
-                            downloadJPEG: "Скачать JPEG",
-                            downloadPDF: "Скачать PDF",
-                            downloadPNG: "Скачать PNG",
-                            downloadSVG: "Скачать SVG",
-                            downloadCSV: "Скачать CSV",
-                            downloadXLS: "Скачать XLS",
-                            viewFullscreen: "Полноэкранный режим",
-                            viewData: "",
-                            drillUpText: "Назад к {series.name}",
-                            loading: "Загрузка...",
-                            months: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
-                                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
-                            noData: "Нет данных для отображения",
-                            printChart: "Напечатать график",
-                            resetZoom: "Сбросить масштаб",
-                            resetZoomTitle: "Сбросить масштаб 1:1",
-                            shortMonths: ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", 
-                                        "Июл", "Август", "Сен", "Окт", "Ноя", "Дек"],
-                            thousandsSep: " ",
-                            weekdays: ["Воскресенье", "Понедельник", "Вторник", "Среда", 
-                                    "Четверг", "Пятница", "Суббота"]
-                        },
-                        chart: {
-                            type: 'line',
-                            zoomType: 'x',
-                            panning: true,
-                            panKey: 'shift',
-                            events: {
-                                load: function() {
-                                    // Обработчик колесика мыши
-                                    this.container.onmousewheel = function(e) {
-                                        e = window.event || e;
-                                        const delta = Math.max(-1, Math.min(1, (e.wheelDelta || -e.detail)));
-                                        const xAxis = this.xAxis[0];
-                                        const extremes = xAxis.getExtremes();
-                                        const range = extremes.max - extremes.min;
-                                        const offset = range * 0.1 * delta;
-                                        
-                                        xAxis.setExtremes(
-                                            extremes.min + offset,
-                                            extremes.max + offset,
-                                            true, // Анимация
-                                            false // Не обновлять событие zoom
-                                        );
-                                        e.preventDefault();
-                                    }.bind(this);
-                                },
-                            }
-                        },
-                        title: {
-                            text: 'График загрузки ресурсов'
-                        },
-                        subtitle: {
-                            text: 'Доступные и занятые человеко-дни по дням'
-                        },
-                        xAxis: {
-                            categories: categories,
-                            crosshair: true,
-                            labels: {
-                                rotation: -45
-                            }
-                        },
-                        yAxis: {
-                            min: 0,
-                            title: {
-                                text: 'Человеко-дни'
-                            },
-                        },
-                        tooltip: {
-                            shared: true,
-                            formatter: function() {
-                                const pointIndex = this.points[0].point.index;
-                                const date = this.points[0].series.xAxis.categories[pointIndex];
-                                let s = '<b>' + date + '</b>';
-                                this.points.forEach(point => {
-                                    s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
-                                        point.series.name + ': ' + point.y.toFixed(1);
-                                });
-                                return s;
-                            }
-                        },
-                        plotOptions: {
-                            line: {
-                                marker: {
-                                    enabled: true,
-                                    radius: 3
-                                }
-                            },
-                            series: {
-                                cursor: 'pointer',
-                                point: {
-                                    events: {
-                                        click: function() {
-                                            // Можно добавить обработчик клика по точке
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        series: [{
-                            name: 'Занятые ЧД',
-                            data: occupiedData,
-                            color: '#ff6384',
-                            lineWidth: 2,
-                            marker: {
-                                symbol: 'square'
-                            }
-                        }, {
-                            name: 'Свободные ЧД',
-                            data: freeData,
-                            color: '#4bc0c0',
-                            lineWidth: 2,
-                            marker: {
-                                symbol: 'diamond'
-                            }
-                        }],
-                        legend: {
-                            layout: 'horizontal',
-                            align: 'center',
-                            verticalAlign: 'bottom'
-                        },
-                        responsive: {
-                            rules: [{
-                                condition: {
-                                    maxWidth: 500
-                                },
-                                chartOptions: {
-                                    legend: {
-                                        layout: 'horizontal',
-                                        align: 'center',
-                                        verticalAlign: 'bottom'
-                                    }
-                                }
-                            }]
+    // Для каждой даты получаем данные
+    for (const dateStr of allDates) {
+        const m = moment(dateStr);
+        categories.push(m.format('DD.MM.YY'));
+        
+        const available = this.getAvailableManDays(dateStr);
+        const occupied = await this.getOccupiedManDays(dateStr);
+        const free = Math.max(0, available - occupied);
+        const overload = Math.max(0, occupied - available);
+        
+        availableData.push(available);
+        occupiedData.push(occupied);
+        freeData.push(free);
+        overloadData.push(overload);
+    }
+
+    Highcharts.chart('loadChart', {
+        lang: {
+            contextButtonTitle: "Контекстное меню",
+            decimalPoint: ",",
+            downloadJPEG: "Скачать JPEG",
+            downloadPDF: "Скачать PDF",
+            downloadPNG: "Скачать PNG",
+            downloadSVG: "Скачать SVG",
+            downloadCSV: "Скачать CSV",
+            downloadXLS: "Скачать XLS",
+            viewFullscreen: "Полноэкранный режим",
+            viewData: "",
+            drillUpText: "Назад к {series.name}",
+            loading: "Загрузка...",
+            months: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
+                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
+            noData: "Нет данных для отображения",
+            printChart: "Напечатать график",
+            resetZoom: "Сбросить масштаб",
+            resetZoomTitle: "Сбросить масштаб 1:1",
+            shortMonths: ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", 
+                        "Июл", "Август", "Сен", "Окт", "Ноя", "Дек"],
+            thousandsSep: " ",
+            weekdays: ["Воскресенье", "Понедельник", "Вторник", "Среда", 
+                    "Четверг", "Пятница", "Суббота"]
+        },
+        chart: {
+            type: 'line',
+            zoomType: 'x',
+            panning: true,
+            panKey: 'shift',
+            events: {
+                load: function() {
+                    const chart = this;
+                    let isScrolling = false;
+                    
+                    // Отключаем стандартное поведение колесика для масштабирования
+                    chart.container.style.overflowX = 'auto';
+                    
+                    // Обработчик колесика мыши для горизонтального скролла
+                    this.container.onwheel = function(e) {
+                        e.preventDefault();
+                        
+                        if (isScrolling) return;
+                        isScrolling = true;
+                        
+                        const delta = e.deltaY || e.deltaX;
+                        const scrollSpeed = 50; // Скорость скролла
+                        
+                        // Получаем текущие границы оси X
+                        const xAxis = chart.xAxis[0];
+                        const extremes = xAxis.getExtremes();
+                        
+                        // Рассчитываем границы данных
+                        const dataMin = 0;
+                        const dataMax = categories.length - 1;
+                        const currentRange = extremes.max - extremes.min;
+                        
+                        // Определяем буферную зону (20px в единицах данных)
+                        // Рассчитываем размер буфера на основе текущего масштаба
+                        const bufferZone = 20 / (chart.chartWidth / currentRange);
+                        
+                        // Определяем направление скролла
+                        const scrollDirection = delta > 0 ? 1 : -1;
+                        
+                        // Проверяем, можно ли скроллить в данном направлении с учетом буферной зоны
+                        const canScrollLeft = scrollDirection > 0 && extremes.min > dataMin + bufferZone;
+                        const canScrollRight = scrollDirection < 0 && extremes.max < dataMax - bufferZone;
+                        
+                        // Если достигли буферной зоны - блокируем скролл
+                        if (!canScrollLeft && !canScrollRight) {
+                            isScrolling = false;
+                            return;
                         }
+                        
+                        // Вычисляем смещение с учетом скорости скролла
+                        const offset = (scrollDirection * scrollSpeed) / currentRange;
+                        
+                        // Вычисляем новые границы
+                        let newMin = extremes.min - offset;
+                        let newMax = extremes.max - offset;
+                        
+                        // Ограничиваем скролл с учетом буферной зоны слева
+                        if (newMin < dataMin + bufferZone) {
+                            newMin = dataMin + bufferZone;
+                            newMax = newMin + currentRange;
+                        }
+                        
+                        // Ограничиваем скролл с учетом буферной зоны справа
+                        if (newMax > dataMax - bufferZone) {
+                            newMax = dataMax - bufferZone;
+                            newMin = newMax - currentRange;
+                        }
+                        
+                        // Убеждаемся, что диапазон валиден
+                        if (newMin >= dataMin && newMax <= dataMax && newMin < newMax) {
+                            xAxis.setExtremes(newMin, newMax, true, false, {
+                                trigger: 'pan'
+                            });
+                        }
+                        
+                        setTimeout(() => {
+                            isScrolling = false;
+                        }, 50);
+                        
+                    }.bind(this);
+                    
+                    // Дополнительно: обработчик для жестов тачпада
+                    this.container.addEventListener('gesturestart', function(e) {
+                        e.preventDefault();
+                    });
+                    
+                    this.container.addEventListener('gesturechange', function(e) {
+                        e.preventDefault();
+                    });
+                    
+                    this.container.addEventListener('gestureend', function(e) {
+                        e.preventDefault();
                     });
                 },
-
+                // Отключаем масштабирование колесиком мыши
+                beforeRender: function() {
+                    this.mouseWheelZoomEnabled = false;
+                },
+                // Обновляем размеры при ресайзе
+                redraw: function() {
+                    // Принудительно обновляем расчеты при изменении размера
+                    this.mouseWheelZoomEnabled = false;
+                }
+            }
+        },
+        title: {
+            text: 'График загрузки ресурсов'
+        },
+        subtitle: {
+            text: 'Доступные и занятые человеко-дни по дням'
+        },
+        xAxis: {
+            categories: categories,
+            crosshair: true,
+            labels: {
+                rotation: -45
+            },
+            minRange: 1 // Минимальный диапазон масштабирования
+        },
+        yAxis: {
+            min: 0,
+            title: {
+                text: 'Человеко-дни'
+            },
+        },
+        tooltip: {
+            shared: true,
+            formatter: function() {
+                const pointIndex = this.points[0].point.index;
+                const date = this.points[0].series.xAxis.categories[pointIndex];
+                let s = '<b>' + date + '</b>';
+                this.points.forEach(point => {
+                    s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
+                        point.series.name + ': ' + point.y.toFixed(1);
+                });
+                return s;
+            }
+        },
+        plotOptions: {
+            line: {
+                marker: {
+                    enabled: true,
+                    radius: 3
+                }
+            },
+            series: {
+                cursor: 'pointer',
+                point: {
+                    events: {
+                        click: function() {
+                            // Можно добавить обработчик клика по точке
+                        }
+                    }
+                }
+            }
+        },
+        series: [{
+            name: 'Занятые ЧД',
+            data: occupiedData,
+            color: '#ff6384',
+            lineWidth: 2,
+            marker: {
+                symbol: 'square'
+            }
+        }, {
+            name: 'Свободные ЧД',
+            data: freeData,
+            color: '#4bc0c0',
+            lineWidth: 2,
+            marker: {
+                symbol: 'diamond'
+            }
+        }],
+        legend: {
+            layout: 'horizontal',
+            align: 'center',
+            verticalAlign: 'bottom'
+        },
+        responsive: {
+            rules: [{
+                condition: {
+                    maxWidth: 500
+                },
+                chartOptions: {
+                    legend: {
+                        layout: 'horizontal',
+                        align: 'center',
+                        verticalAlign: 'bottom'
+                    }
+                }
+            }]
+        }
+    });
+},
                 // Остальные методы остаются без изменений
                 async apiCall(url, options = {}) {
                     try {
