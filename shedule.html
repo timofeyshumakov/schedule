@@ -326,7 +326,7 @@
                                                 </thead>
                                                 <tbody>
                                                     <tr v-for="employee in employees" :key="employee.id">
-                                                        <template v-if="!employee.termination_date">
+                                                        <template>
                                                             <td>{{ employee.name }}</td>
                                                             <td v-for="date in tableDates" 
                                                                 :key="date" 
@@ -518,7 +518,6 @@
         moment.locale('ru');
         //import { callApi } from "./src/functions/callApi";
         const API_BASE =  "https://5648299-ej74484.twc1.net/shedule/api"; //'http://localhost/shedule/api';
-
         new Vue({
             el: '#app',
             vuetify: new Vuetify({
@@ -620,6 +619,16 @@
                 }
             },
             methods: {
+                isEmployeeTerminated(employee, date) {
+        if (!employee.termination_date) return false;
+        return moment(date).isAfter(moment(employee.termination_date), 'day');
+    },
+
+    // Метод для проверки, является ли сотрудник принятым на определенную дату
+    isEmployeeHired(employee, date) {
+        if (!employee.created_at) return true; // Если дата приема не указана, считаем принятым
+        return moment(date).isSameOrAfter(moment(employee.created_at), 'day');
+    },
 updateTableDates() {
     this.tableDates = [];
     const start = moment(this.tableDateStart);
@@ -843,6 +852,7 @@ createDefaultCalendar(year) {
                             ...emp,
                             schedule: {}
                         }));
+                        console.log(data);
                     } catch (error) {
                         this.showError('Ошибка загрузки сотрудников: ' + error.message);
                     }
@@ -1126,6 +1136,12 @@ createDefaultCalendar(year) {
                 },
 
                 changeIcon(employee, date) {
+                    // Не позволяем изменять статус для уволенных сотрудников или до даты приема
+                    if (this.isEmployeeTerminated(employee, date) || !this.isEmployeeHired(employee, date)) {
+                        this.showError('Нельзя изменить статус для этого периода');
+                        return;
+                    }
+                    
                     this.currentEmployee = employee;
                     this.currentDate = date;
                     this.selectedStatus = employee.schedule[date] || 
@@ -1133,59 +1149,84 @@ createDefaultCalendar(year) {
                     this.iconDialog = true;
                 },
                 getCellClass(employee, date) {
-                    const status = employee.schedule[date];
-                    if (status === 'vacation') return 'vacation';
-                    if (status === 'sick') return 'sick';
-                    if (status === 'weekend') return 'weekend';
-                    if (status === 'working') return 'working';
-                    return this.isWeekend(date) ? 'weekend' : 'working';
-                },
-
+                    if (this.isEmployeeTerminated(employee, date)) {
+                            return 'terminated';
+                        }
+                        
+                        // Проверяем статус приема
+                        if (!this.isEmployeeHired(employee, date)) {
+                            return 'not-hired';
+                        }
+                        
+                        const status = employee.schedule[date];
+                        if (status === 'vacation') return 'vacation';
+                        if (status === 'sick') return 'sick';
+                        if (status === 'weekend') return 'weekend';
+                        if (status === 'working') return 'working';
+                        return this.isWeekend(date) ? 'weekend' : 'working';
+                    },
                 getCellContent(employee, date) {
-                    const status = employee.schedule[date];
-                    
-                    if (status === 'vacation') {
-                        return {
-                            icon: 'mdi-palm-tree',
-                            tooltip: 'Отпуск',
-                            color: 'orange'
-                        };
-                    }
-                    if (status === 'sick') {
-                        return {
-                            icon: 'mdi-hospital-box',
-                            tooltip: 'Больничный',
-                            color: 'red'
-                        };
-                    }
-                    if (status === 'weekend') {
-                        return {
-                            icon: 'mdi-sofa',
-                            tooltip: 'Выходной',
-                            color: 'grey'
-                        };
-                    }
-                    if (status === 'working') {
-                        return {
-                            icon: 'mdi-briefcase',
-                            tooltip: 'Рабочий день',
-                            color: 'green'
-                        };
-                    }
-                    
-                    return this.isWeekend(date) 
-                        ? {
-                            icon: 'mdi-sofa',
-                            tooltip: 'Выходной',
-                            color: 'grey'
-                        } 
-                        : {
-                            icon: 'mdi-briefcase',
-                            tooltip: 'Рабочий день',
-                            color: 'green'
-                        };
-                },
-
+        // Проверяем статус увольнения
+        if (this.isEmployeeTerminated(employee, date)) {
+            return {
+                icon: 'mdi-account-off',
+                tooltip: 'Уволен',
+                color: 'grey darken-2'
+            };
+        }
+        
+        // Проверяем статус приема
+        if (!this.isEmployeeHired(employee, date)) {
+            return {
+                icon: 'mdi-account-clock',
+                tooltip: 'Еще не принят',
+                color: 'blue-grey lighten-2'
+            };
+        }
+        
+        const status = employee.schedule[date];
+        
+        if (status === 'vacation') {
+            return {
+                icon: 'mdi-palm-tree',
+                tooltip: 'Отпуск',
+                color: 'orange'
+            };
+        }
+        if (status === 'sick') {
+            return {
+                icon: 'mdi-hospital-box',
+                tooltip: 'Больничный',
+                color: 'red'
+            };
+        }
+        if (status === 'weekend') {
+            return {
+                icon: 'mdi-sofa',
+                tooltip: 'Выходной',
+                color: 'grey'
+            };
+        }
+        if (status === 'working') {
+            return {
+                icon: 'mdi-briefcase',
+                tooltip: 'Рабочий день',
+                color: 'green'
+            };
+        }
+        
+        return this.isWeekend(date) 
+            ? {
+                icon: 'mdi-sofa',
+                tooltip: 'Выходной',
+                color: 'grey'
+            } 
+            : {
+                icon: 'mdi-briefcase',
+                tooltip: 'Рабочий день',
+                color: 'green'
+            };
+    },
                 // МЕТОДЫ ДЛЯ ПРАВИЛЬНОГО РАСЧЕТА ЧЕЛОВЕКО-ДНЕЙ
                 // Основной метод проверки возможности добавления сделки
                 async checkDeal() {
@@ -1798,13 +1839,25 @@ async getOverload(date) {
                 },
                 // Обновление графика загрузки
 async updateChart() {
+    const currentYear = moment().year();
+    const nextYear = currentYear + 1;
+    
+    // Начало текущего года
     const startDate = moment();
-    const endDate = moment().add(45, 'days');
+    // Конец следующего года (если он существует)
+    const endDate = moment().endOf('year').add(1, 'year');
+    
     const categories = [];
     const availableData = [];
     const occupiedData = [];
     const freeData = [];
     const overloadData = [];
+
+    // Загружаем производственные календари для текущего и следующего года
+    await this.loadProductionCalendarForYear(currentYear);
+    if (moment().month() >= 10) { // Если текущий месяц октябрь или позже, загружаем календарь на следующий год
+        await this.loadProductionCalendarForYear(nextYear);
+    }
 
     // Создаем массив всех дат в периоде
     const allDates = [];
@@ -1828,6 +1881,7 @@ async updateChart() {
         overloadData.push(overload);
     }
 
+    // Обновляем конфигурацию графика для лучшего отображения большого количества данных
     Highcharts.chart('loadChart', {
         lang: {
             contextButtonTitle: "Контекстное меню",
@@ -1854,113 +1908,52 @@ async updateChart() {
             weekdays: ["Воскресенье", "Понедельник", "Вторник", "Среда", 
                     "Четверг", "Пятница", "Суббота"]
         },
-        chart: {
+                chart: {
             type: 'line',
             zoomType: 'x',
             panning: true,
-            panKey: 'shift',
             events: {
                 load: function() {
                     const chart = this;
-                    let isScrolling = false;
+                    const initialDays = 30; // Показываем 60 дней изначально
                     
-                    // Отключаем стандартное поведение колесика для масштабирования
-                    chart.container.style.overflowX = 'auto';
+                    // Устанавливаем начальный видимый диапазон
+                    const initialMax = Math.min(initialDays - 1, categories.length - 1);
+                    chart.xAxis[0].setExtremes(0, initialMax);
                     
-                    // Обработчик колесика мыши для горизонтального скролла
-                    this.container.onwheel = function(e) {
+                    // Добавляем кастомный скролл
+                    chart.container.onwheel = function(e) {
                         e.preventDefault();
-                        
-                        if (isScrolling) return;
-                        isScrolling = true;
                         
                         const delta = e.deltaY || e.deltaX;
-                        const scrollSpeed = 50; // Скорость скролла
+                        const scrollSpeed = 5; // Скорость скролла
                         
-                        // Получаем текущие границы оси X
                         const xAxis = chart.xAxis[0];
                         const extremes = xAxis.getExtremes();
+                        const range = extremes.max - extremes.min;
                         
-                        // Рассчитываем границы данных
-                        const dataMin = 0;
-                        const dataMax = categories.length - 1;
-                        const currentRange = extremes.max - extremes.min;
+                        // Рассчитываем новый диапазон
+                        let newMin = extremes.min + (delta > 0 ? scrollSpeed : -scrollSpeed);
+                        let newMax = extremes.max + (delta > 0 ? scrollSpeed : -scrollSpeed);
                         
-                        // Определяем буферную зону (20px в единицах данных)
-                        // Рассчитываем размер буфера на основе текущего масштаба
-                        const bufferZone = 20 / (chart.chartWidth / currentRange);
-                        
-                        // Определяем направление скролла
-                        const scrollDirection = delta > 0 ? 1 : -1;
-                        
-                        // Проверяем, можно ли скроллить в данном направлении с учетом буферной зоны
-                        const canScrollLeft = scrollDirection > 0 && extremes.min > dataMin + bufferZone;
-                        const canScrollRight = scrollDirection < 0 && extremes.max < dataMax - bufferZone;
-                        
-                        // Если достигли буферной зоны - блокируем скролл
-                        if (!canScrollLeft && !canScrollRight) {
-                            isScrolling = false;
-                            return;
+                        // Проверяем границы
+                        if (newMin < 0) {
+                            newMin = 0;
+                            newMax = range;
+                        }
+                        if (newMax >= categories.length) {
+                            newMax = categories.length - 1;
+                            newMin = newMax - range;
                         }
                         
-                        // Вычисляем смещение с учетом скорости скролла
-                        const offset = (scrollDirection * scrollSpeed) / currentRange;
-                        
-                        // Вычисляем новые границы
-                        let newMin = extremes.min - offset;
-                        let newMax = extremes.max - offset;
-                        
-                        // Ограничиваем скролл с учетом буферной зоны слева
-                        if (newMin < dataMin + bufferZone) {
-                            newMin = dataMin + bufferZone;
-                            newMax = newMin + currentRange;
-                        }
-                        
-                        // Ограничиваем скролл с учетом буферной зоны справа
-                        if (newMax > dataMax - bufferZone) {
-                            newMax = dataMax - bufferZone;
-                            newMin = newMax - currentRange;
-                        }
-                        
-                        // Убеждаемся, что диапазон валиден
-                        if (newMin >= dataMin && newMax <= dataMax && newMin < newMax) {
-                            xAxis.setExtremes(newMin, newMax, true, false, {
-                                trigger: 'pan'
-                            });
-                        }
-                        
-                        setTimeout(() => {
-                            isScrolling = false;
-                        }, 50);
-                        
-                    }.bind(this);
-                    
-                    // Дополнительно: обработчик для жестов тачпада
-                    this.container.addEventListener('gesturestart', function(e) {
-                        e.preventDefault();
-                    });
-                    
-                    this.container.addEventListener('gesturechange', function(e) {
-                        e.preventDefault();
-                    });
-                    
-                    this.container.addEventListener('gestureend', function(e) {
-                        e.preventDefault();
-                    });
-                },
-                // Отключаем масштабирование колесиком мыши
-                beforeRender: function() {
-                    this.mouseWheelZoomEnabled = false;
-                },
-                // Обновляем размеры при ресайзе
-                redraw: function() {
-                    // Принудительно обновляем расчеты при изменении размера
-                    this.mouseWheelZoomEnabled = false;
+                        // Применяем новый диапазон
+                        xAxis.setExtremes(newMin, newMax, true, false);
+                    };
                 }
             }
         },
         title: {
-            text: 'График загрузки ресурсов'
+            text: 'График загрузки ресурсов на ' + currentYear + (endDate.year() > currentYear ? '-' + nextYear : '')
         },
         subtitle: {
             text: 'Доступные и занятые человеко-дни по дням'
@@ -1969,9 +1962,17 @@ async updateChart() {
             categories: categories,
             crosshair: true,
             labels: {
-                rotation: -45
+                rotation: -45,
+                formatter: function() {
+                    // Группируем подписи по месяцам для лучшей читаемости
+                    const date = moment(this.value, 'DD.MM.YY');
+                    const day = date.date();
+                    const month = date.month();
+                    // Для остальных дней показываем только число
+                    return date.format('DD.MM.YY');
+                }
             },
-            minRange: 1 // Минимальный диапазон масштабирования
+            //minRange: 7 // Минимальный диапазон - неделя
         },
         yAxis: {
             min: 0,
@@ -1983,8 +1984,8 @@ async updateChart() {
             shared: true,
             formatter: function() {
                 const pointIndex = this.points[0].point.index;
-                const date = this.points[0].series.xAxis.categories[pointIndex];
-                let s = '<b>' + date + '</b>';
+                const date = moment(this.points[0].series.xAxis.categories[pointIndex], 'DD.MM.YY');
+                let s = '<b>' + date.format('DD.MM.YYYY (dddd)') + '</b>';
                 this.points.forEach(point => {
                     s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
                         point.series.name + ': ' + point.y.toFixed(1);
@@ -1995,16 +1996,17 @@ async updateChart() {
         plotOptions: {
             line: {
                 marker: {
-                    enabled: true,
-                    radius: 3
-                }
+                    enabled: false, // Отключаем маркеры для большого количества точек
+                    radius: 2
+                },
+                lineWidth: 1
             },
             series: {
                 cursor: 'pointer',
                 point: {
                     events: {
                         click: function() {
-                            // Можно добавить обработчик клика по точке
+                            // Обработчик клика по точке
                         }
                     }
                 }
@@ -2014,18 +2016,12 @@ async updateChart() {
             name: 'Занятые ЧД',
             data: occupiedData,
             color: '#ff6384',
-            lineWidth: 2,
-            marker: {
-                symbol: 'square'
-            }
+            lineWidth: 2
         }, {
             name: 'Свободные ЧД',
             data: freeData,
             color: '#4bc0c0',
-            lineWidth: 2,
-            marker: {
-                symbol: 'diamond'
-            }
+            lineWidth: 2
         }],
         legend: {
             layout: 'horizontal',
@@ -2042,6 +2038,11 @@ async updateChart() {
                         layout: 'horizontal',
                         align: 'center',
                         verticalAlign: 'bottom'
+                    },
+                    xAxis: {
+                        labels: {
+                            rotation: -45
+                        }
                     }
                 }
             }]
@@ -2292,7 +2293,31 @@ async normalizeWorkload() {
                     } catch (error) {
                         throw error;
                     }
-                }
+                },
+                async loadOptimizedChartData() {
+                    this.loading = true;
+                    try {
+                        const currentYear = moment().year();
+                        const nextYear = currentYear + 1;
+                        
+                        // Предварительная загрузка всех необходимых данных
+                        await Promise.all([
+                            this.loadProductionCalendarForYear(currentYear),
+                            this.loadProductionCalendarForYear(nextYear),
+                            this.loadEmployees(),
+                            this.loadDeals(),
+                            this.loadSchedule()
+                        ]);
+                        
+                        // Обновляем график
+                        await this.updateChart();
+                        
+                    } catch (error) {
+                        this.showError('Ошибка загрузки данных графика: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
             },
             watch: {
                 tableDateStart() {
@@ -2308,9 +2333,9 @@ async normalizeWorkload() {
                 await this.loadSchedule();
                 await this.refreshData();
                 this.updateTableDates();
-                setTimeout(() => {
-                    this.updateChart();
-                }, 200);
+               // setTimeout(() => {
+                    await this.loadOptimizedChartData();
+               // }, 200);
             }
         });
     </script>
