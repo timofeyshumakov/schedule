@@ -150,7 +150,7 @@
                 <v-toolbar-title>Планирование заказов</v-toolbar-title>
                 <v-spacer></v-spacer>
                 <v-btn text @click="planning">Планирование</v-btn>
-                <v-btn v-if="BX24.isAdmin()" text @click="loadTable">Рабочие графики</v-btn>
+                <v-btn v-if="isAdmin" text @click="loadTable">Рабочие графики</v-btn>
             </v-app-bar>
 
             <v-main>
@@ -532,6 +532,7 @@
             }),
             data() {
                 return {
+                    isAdmin: false,
                     applyProductionCalendar: false,
                     loading: false,
                     loadingCalendar: false,
@@ -1855,7 +1856,7 @@ async updateChart() {
 
     // Загружаем производственные календари для текущего и следующего года
     await this.loadProductionCalendarForYear(currentYear);
-    if (moment().month() >= 10) { // Если текущий месяц октябрь или позже, загружаем календарь на следующий год
+    if (moment().month() >= 9) { // Если текущий месяц сентябрь или позже, загружаем календарь на следующий год
         await this.loadProductionCalendarForYear(nextYear);
     }
 
@@ -1926,7 +1927,7 @@ async updateChart() {
                         e.preventDefault();
                         
                         const delta = e.deltaY || e.deltaX;
-                        const scrollSpeed = 5; // Скорость скролла
+                        const scrollSpeed = 3; // Скорость скролла
                         
                         const xAxis = chart.xAxis[0];
                         const extremes = xAxis.getExtremes();
@@ -2328,6 +2329,14 @@ async normalizeWorkload() {
                 }
             },
             async mounted() {
+                const userId = await new Promise((resolve) => {
+                    // @ts-ignore
+                    BX24.callMethod("user.current", {}, (res) => {
+                        console.log(res);
+                        resolve(res.data().ID);
+                    });
+                });
+                this.isAdmin = userId == 21 || BX24.isAdmin();
                 // Загружаем календарь текущего года
                 await this.loadProductionCalendarForYear(this.currentYear);
                 await this.loadSchedule();
