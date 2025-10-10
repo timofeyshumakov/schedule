@@ -51,5 +51,37 @@ class Employee {
         $stmt->execute([$id]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
+
+    public function update($id, $data) {
+        $sql = "UPDATE employees SET ";
+        $params = [];
+        
+        foreach ($data as $key => $value) {
+            $sql .= "{$key} = :{$key}, ";
+            $params[":{$key}"] = $value;
+        }
+        
+        $sql = rtrim($sql, ', ');
+        $sql .= " WHERE id = :id";
+        $params[':id'] = $id;
+        
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute($params);
+    }
+
+    public function deletePermanently($id) {
+        // Сначала удаляем все связанные записи в расписании
+        $scheduleSql = "DELETE FROM schedules WHERE employee_id = :id";
+        $scheduleStmt = $this->db->prepare($scheduleSql);
+        $scheduleStmt->bindParam(':id', $id);
+        $scheduleStmt->execute();
+
+        // Затем удаляем сотрудника
+        $employeeSql = "DELETE FROM employees WHERE id = :id";
+        $employeeStmt = $this->db->prepare($employeeSql);
+        $employeeStmt->bindParam(':id', $id);
+        
+        return $employeeStmt->execute();
+    }
 }
 ?>

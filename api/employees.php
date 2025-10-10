@@ -14,6 +14,31 @@ $employee = new Employee();
 
 try {
     switch ($_SERVER['REQUEST_METHOD']) {
+        case 'PUT':
+            $data = json_decode(file_get_contents('php://input'), true);
+            if (!isset($data['id'])) {
+                throw new Exception('Employee ID is required');
+            }
+
+            $updateData = [];
+            if (isset($data['name'])) {
+                $updateData['name'] = $data['name'];
+            }
+            if (isset($data['created_at'])) {
+                $updateData['created_at'] = $data['created_at'];
+            }
+            if (isset($data['termination_date'])) {
+                $updateData['termination_date'] = $data['termination_date'];
+            }else{
+                $updateData['termination_date'] = null;
+            }
+
+            if ($employee->update($data['id'], $updateData)) {
+                echo json_encode(['success' => true, 'message' => 'Employee updated']);
+            } else {
+                throw new Exception('Failed to update employee');
+            }
+            break;
         case 'GET':
             $activeOnly = isset($_GET['active']) && $_GET['active'] === 'true';
             
@@ -44,12 +69,23 @@ try {
                 throw new Exception('Employee ID is required');
             }
 
-            $terminationDate = isset($data['termination_date']) ? $data['termination_date'] : date('Y-m-d');
-            
-            if ($employee->terminate($data['id'], $terminationDate)) {
-                echo json_encode(['success' => true, 'message' => 'Employee terminated']);
-            } else {
-                throw new Exception('Failed to terminate employee');
+            // Полное удаление сотрудника
+            if (isset($data['permanent']) && $data['permanent'] === true) {
+                if ($employee->deletePermanently($data['id'])) {
+                    echo json_encode(['success' => true, 'message' => 'Employee permanently deleted']);
+                } else {
+                    throw new Exception('Failed to delete employee permanently');
+                }
+            } 
+            // Стандартное увольнение (установка даты увольнения)
+            else {
+                $terminationDate = isset($data['termination_date']) ? $data['termination_date'] : date('Y-m-d');
+                
+                if ($employee->terminate($data['id'], $terminationDate)) {
+                    echo json_encode(['success' => true, 'message' => 'Employee terminated']);
+                } else {
+                    throw new Exception('Failed to terminate employee');
+                }
             }
             break;
         default:

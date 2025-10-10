@@ -110,7 +110,7 @@ class Database {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 termination_date DATE NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATE DEFAULT CURRENT_TIMESTAMP
             )
         ");
 
@@ -120,7 +120,7 @@ class Database {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_id INTEGER,
                 date TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('working', 'vacation', 'sick', 'weekend')),
+                status TEXT NOT NULL CHECK(status IN ('working', 'vacation', 'sick', 'weekend', 'terminated', 'not_hired')),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(employee_id, date),
                 FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE

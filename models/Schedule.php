@@ -83,7 +83,6 @@ class Schedule {
             SELECT e.name, s.date, s.status, e.termination_date
             FROM employees e
             LEFT JOIN schedules s ON e.id = s.employee_id AND s.date BETWEEN ? AND ?
-            WHERE e.termination_date IS NULL OR e.termination_date >= ?
             ORDER BY e.name, s.date
         ");
         $stmt->execute([$startDate, $endDate]);
@@ -106,19 +105,27 @@ class Schedule {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function deleteEmployeeRecordsForCurrentYear($employeeId) {
-        $currentYear = date('Y');
-        $startDate = $currentYear . '-01-01';
-        $endDate = $currentYear . '-12-31';
-        
-        $sql = "DELETE FROM {$this->table} 
-                WHERE employee_id = :employee_id 
-                AND date BETWEEN :start_date AND :end_date";
-        
-        $stmt = $this->db->prepare($sql);
-        $stmt->bindParam(':employee_id', $employeeId);
-        $stmt->bindParam(':start_date', $startDate);
-        $stmt->bindParam(':end_date', $endDate);
+    public function deleteEmployeeRecords($employeeId, $deleteAll = false) {
+        if ($deleteAll) {
+            // Удалить все записи сотрудника
+            $sql = "DELETE FROM {$this->table} WHERE employee_id = :employee_id";
+            $stmt = $this->db->prepare($sql);
+            $stmt->bindParam(':employee_id', $employeeId);
+        } else {
+            // Удалить только записи текущего года (старая логика)
+            $currentYear = date('Y');
+            $startDate = $currentYear . '-01-01';
+            $endDate = $currentYear . '-12-31';
+            
+            $sql = "DELETE FROM {$this->table} 
+                    WHERE employee_id = :employee_id 
+                    AND date BETWEEN :start_date AND :end_date";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->bindParam(':employee_id', $employeeId);
+            $stmt->bindParam(':start_date', $startDate);
+            $stmt->bindParam(':end_date', $endDate);
+        }
         
         return $stmt->execute();
     }
