@@ -1792,6 +1792,26 @@ async getOccupiedManDays(date) {
     // Гарантируем, что занятость не превышает доступную емкость
     return Math.min(totalLoad, availableManDays);
 },
+/**
+ * Суммарная потребность в ЧД по всем сделкам на дату без ограничения емкостью дня.
+ * Нужна для обнаружения перегруза: getOccupiedManDays всегда возвращает min(нагрузка, available),
+ * поэтому при перегрузке available === occupied и условие occupied > available никогда не срабатывает.
+ */
+getRawOccupiedManDays(date) {
+    let totalLoad = 0;
+    const currentMoment = moment(date);
+    for (const deal of this.deals) {
+        const dealStart = moment(deal.UF_CRM_1755511210978).subtract(1, 'day');
+        const dealEnd = moment(deal.UF_CRM_1755511228885);
+        if (currentMoment.isBetween(dealStart, dealEnd, null, '[]')) {
+            const workDaysInDeal = this.countWorkDaysInPeriod(dealStart, dealEnd) - 1;
+            if (workDaysInDeal > 0) {
+                totalLoad += deal.UF_CRM_1755511268203 / workDaysInDeal;
+            }
+        }
+    }
+    return totalLoad;
+},
 async addDealWithRedistribution() {
     if (!this.canAddDeal) return;
 
@@ -2791,16 +2811,16 @@ async redistributeOverload() {
                 
                 if (!this.isWeekend(dateStr)) {
                     const available = this.getAvailableManDays(dateStr);
-                    const available90 = available * 0.9; // Доступная нагрузка (90%)
-                    const occupied = this.occupancyCache[dateStr] || await this.getOccupiedManDays(dateStr);
-                    
-                    if (occupied > available90) {
+                    const occupied = this.occupancyCache[dateStr] ?? await this.getOccupiedManDays(dateStr);
+                    const rawOccupied = this.getRawOccupiedManDays(dateStr);
+                    // Перегруз: фактическая потребность ЧД больше мощности дня (occupied из getOccupied — усечённый)
+                    if (rawOccupied > available) {
                         overloadedDays.push({
                             date: dateStr,
-                            overload: occupied - available90, // Перегрузка сверх 90%
+                            overload: rawOccupied - available,
                             available: available,
-                            available90: available90,
                             occupied: occupied,
+                            rawOccupied: rawOccupied,
                             dateObj: currentDate.clone()
                         });
                     }
@@ -2851,14 +2871,13 @@ async redistributeOverload() {
                 console.log(`Ищем место для ${remainingOverload.toFixed(2)} ЧД начиная с ${searchDate.format('YYYY-MM-DD')}`);
                 
                 // Накапливаем перераспределение на следующих днях пока не распределим всю перегрузку
-                // Заполняем каждый день до 90% перед переходом к следующему
+                // Заполняем каждый день до 100% мощности перед переходом к следующему
                 while (remainingOverload > 0 && totalDaysExtended < maxExtension) {
                     const searchDateStr = searchDate.format('YYYY-MM-DD');
                     
                     // Пропускаем выходные
                     if (!this.isWeekend(searchDateStr)) {
                         const available = this.getAvailableManDays(searchDateStr);
-                        const available90 = available * 0.9; // 90% от доступной емкости
                         
                         // Всегда используем значение из кэша (которое накапливается в течение итерации)
                         // Если в кэше нет значения, получаем из базы
@@ -2869,13 +2888,13 @@ async redistributeOverload() {
                             this.occupancyCache[searchDateStr] = occupied;
                         }
                         
-                        // Свободное место до 90%
-                        const freeSpace = Math.max(0, available90 - occupied);
+                        // Свободное место до полной мощности дня
+                        const freeSpace = Math.max(0, available - occupied);
                         
                         if (freeSpace > 0) {
                             // Сколько можем поместить в этот день
                             const canFit = Math.min(remainingOverload, freeSpace);
-                            console.log(`  День ${searchDateStr}: вместимость до 90% = ${available90.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД, свободно = ${freeSpace.toFixed(1)} ЧД, помещаем = ${canFit.toFixed(2)} ЧД`);
+                            console.log(`  День ${searchDateStr}: вместимость (100%) = ${available.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД, свободно = ${freeSpace.toFixed(1)} ЧД, помещаем = ${canFit.toFixed(2)} ЧД`);
                             
                             remainingOverload -= canFit;
                             totalDaysExtended++;
@@ -2884,8 +2903,8 @@ async redistributeOverload() {
                             this.occupancyCache[searchDateStr] = occupied + canFit;
                             console.log(`  Обновленная занятость дня ${searchDateStr}: ${this.occupancyCache[searchDateStr].toFixed(1)} ЧД`);
                         } else {
-                            // Нет свободного места до 90%, переходим к следующему дню
-                            console.log(`  День ${searchDateStr}: нет свободного места до 90% (свободно = ${freeSpace.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД)`);
+                            // Нет свободного места до 100%, переходим к следующему дню
+                            console.log(`  День ${searchDateStr}: нет свободного места до 100% мощности (свободно = ${freeSpace.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД)`);
                         }
                     }
                     
