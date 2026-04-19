@@ -724,6 +724,7 @@
                     productionCalendars: {}, // Хранит календари по годам: {2024: [...], 2025: [...]}
                     currentYear: new Date().getFullYear(),
                     occupancyCache: {}, // Кэш для рассчитанной занятости
+                    dynamicRawDemandCache: {}, // Сумма «идеальных» ЧД/день до усечения ёмкостью (динамическое распределение)
                     availableManDaysCache: {}, // Кэш для доступных человеко-дней
                     lastDealsUpdate: null, // Время последнего обновления сделок
                     cacheValid: false, // Флаг валидности кэша
@@ -745,6 +746,7 @@
             methods: {
                 initCache() {
         this.occupancyCache = {};
+        this.dynamicRawDemandCache = {};
         this.availableManDaysCache = {};
         this.cacheValid = false;
     },
@@ -753,127 +755,136 @@
     invalidateCache() {
         this.cacheValid = false;
         this.occupancyCache = {};
+        this.dynamicRawDemandCache = {};
         this.availableManDaysCache = {};
     },
 
-    // Оптимизированный метод получения занятых человеко-дней с кэшированием
-    async getOccupiedManDays(date) {
-        // Проверяем кэш и валидность данных
-        if (this.occupancyCache[date] !== undefined && this.cacheValid) {
-            const available = this.getAvailableManDays(date);
-            return Math.min(this.occupancyCache[date], available);
-        }
+                /** Границы периода сделки по полям CRM (включительно по дням) */
+                dealPeriodBounds(deal) {
+                    return {
+                        start: moment(deal.UF_CRM_1755511210978).startOf('day'),
+                        end: moment(deal.UF_CRM_1755511228885).startOf('day'),
+                    };
+                },
+                isDealActiveOnDate(deal, dateStr) {
+                    const d = moment(dateStr).startOf('day');
+                    const { start, end } = this.dealPeriodBounds(deal);
+                    if (!start.isValid() || !end.isValid() || end.isBefore(start)) return false;
+                    return !d.isBefore(start) && !d.isAfter(end);
+                },
+                /** Рабочие дни в периоде сделки по производственному календарю (для делителя ЧД) */
+                getDealWorkDaysCount(deal) {
+                    const { start, end } = this.dealPeriodBounds(deal);
+                    if (!start.isValid() || !end.isValid() || end.isBefore(start)) return 0;
+                    return this.countWorkDaysInPeriod(start, end);
+                },
 
-        let totalLoad = 0;
-        const currentMoment = moment(date);
-        const availableManDays = this.getAvailableManDays(date);
-        
-        // Используем более эффективный алгоритм фильтрации сделок
-        const relevantDeals = this.deals.filter(deal => {
-            const dealStart = moment(deal.UF_CRM_1755511210978).subtract(1, 'day');
-            const dealEnd = moment(deal.UF_CRM_1755511228885);
-            return currentMoment.isBetween(dealStart, dealEnd, null, '[]');
-        });
+                /**
+                 * Распределение ЧД по дням: приоритет у сделок с меньшим числом рабочих дней в периоде.
+                 * На день D: базовая ставка = остаток_ЧД / оставшиеся_рабочие_дни до конца сделки.
+                 * Проход 1 — короткие сделки первыми получают min(ставка, оставшаяся ёмкость).
+                 * Проход 2 — оставшаяся ёмкость дня добирается сделками с большим периодом (с конца списка),
+                 * пока не исчерпаны ЧД или 100% ёмкости дня (что наступит раньше).
+                 */
+                runDynamicLoadSimulation(rangeStartStr, rangeEndStr) {
+                    const rs = moment(rangeStartStr).startOf('day');
+                    const re = moment(rangeEndStr).startOf('day');
+                    const remainingMD = {};
+                    for (const deal of this.deals) {
+                        const id = String(deal.ID || deal.id);
+                        const { start, end } = this.dealPeriodBounds(deal);
+                        if (!start.isValid() || !end.isValid() || end.isBefore(start, 'day')) continue;
+                        if (end.isBefore(rs, 'day') || start.isAfter(re, 'day')) continue;
+                        const W = this.getDealWorkDaysCount(deal);
+                        if (W <= 0) continue;
+                        const effStart = moment.max(start, rs);
+                        const remW = this.countWorkDaysInPeriod(effStart, end);
+                        remainingMD[id] = deal.UF_CRM_1755511268203 * (remW / W);
+                    }
 
-        // Предварительно вычисляем рабочие дни для каждой сделки
-        const dealWorkDays = new Map();
-        
-        for (const deal of relevantDeals) {
-            const dealId = deal.ID || deal.id;
-            if (!dealWorkDays.has(dealId)) {
-                const dealStart = moment(deal.UF_CRM_1755511210978).subtract(1, 'day');
-                const dealEnd = moment(deal.UF_CRM_1755511228885);
-                const workDays = this.countWorkDaysInPeriod(dealStart, dealEnd) - 1;
-                dealWorkDays.set(dealId, workDays);
-            }
-        }
+                    let cur = rs.clone();
+                    while (cur.isSameOrBefore(re, 'day')) {
+                        const dateStr = cur.format('YYYY-MM-DD');
+                        const available = this.getAvailableManDays(dateStr);
+                        this.availableManDaysCache[dateStr] = available;
 
-        // Рассчитываем нагрузку
-        for (const deal of relevantDeals) {
-            const dealId = deal.ID || deal.id;
-            const workDaysInDeal = dealWorkDays.get(dealId);
-            
-            if (workDaysInDeal > 0) {
-                const dailyLoad = deal.UF_CRM_1755511268203 / workDaysInDeal;
-                
-                if (totalLoad + dailyLoad > availableManDays) {
-                    totalLoad = availableManDays;
-                    break;
-                } else {
-                    totalLoad += dailyLoad;
-                }
-            }
-        }
-        
-        // Сохраняем в кэш
-        this.occupancyCache[date] = totalLoad;
-        
-        return Math.min(totalLoad, availableManDays);
-    },
+                        if (this.isWeekend(dateStr)) {
+                            this.occupancyCache[dateStr] = 0;
+                            this.dynamicRawDemandCache[dateStr] = 0;
+                            cur.add(1, 'day');
+                            continue;
+                        }
 
-    // Оптимизированный метод получения доступных человеко-дней с кэшированием
-    getAvailableManDays(date) {
-        if (this.availableManDaysCache[date] !== undefined && this.cacheValid) {
-            return this.availableManDaysCache[date];
-        }
+                        const activeDeals = this.deals
+                            .filter((d) => this.isDealActiveOnDate(d, dateStr))
+                            .sort((a, b) => {
+                                const wa = this.getDealWorkDaysCount(a);
+                                const wb = this.getDealWorkDaysCount(b);
+                                if (wa !== wb) return wa - wb;
+                                return String(a.ID || a.id).localeCompare(String(b.ID || b.id));
+                            });
 
-        const dateMoment = moment(date);
-        // Используем более эффективный подход с предварительной фильтрацией
-        const availableCount = this.employees.reduce((count, emp) => {
-            // Быстрая проверка дат приема/увольнения
-            if (emp.created_at && moment(emp.created_at).isAfter(dateMoment, 'day')) {
-                return count;
-            }
-            if (emp.termination_date && moment(emp.termination_date).isBefore(dateMoment, 'day')) {
-                return count;
-            }
+                        let remCap = available;
+                        let rawDemandSum = 0;
+                        let occupiedSum = 0;
 
-            const status = emp.schedule[date];
-            
-            if (status === 'working') return count + 1;
-            if (status === 'vacation' || status === 'sick' || status === 'weekend' || 
-                status === 'terminated' || status === 'not_hired') return count;
-            
-            return this.isWeekend(date) ? count : count + 1;
-        }, 0);
+                        for (const deal of activeDeals) {
+                            const id = String(deal.ID || deal.id);
+                            let rem = remainingMD[id];
+                            if (rem === undefined || rem <= 0) continue;
+                            const { end: endDeal } = this.dealPeriodBounds(deal);
+                            const remWork = this.countWorkDaysInPeriod(moment(dateStr).startOf('day'), endDeal);
+                            if (remWork <= 0) continue;
+                            const ideal = rem / remWork;
+                            rawDemandSum += ideal;
+                            const take = Math.min(ideal, remCap);
+                            occupiedSum += take;
+                            remainingMD[id] = Math.max(0, rem - take);
+                            remCap -= take;
+                        }
 
-        const result = Math.max(0, availableCount);
-        this.availableManDaysCache[date] = result;
-        return result;
-    },
+                        // Добор до полной ёмкости дня: сначала длинные активные сделки (обратный порядок)
+                        if (remCap > 1e-6) {
+                            for (let i = activeDeals.length - 1; i >= 0; i--) {
+                                if (remCap <= 1e-6) break;
+                                const deal = activeDeals[i];
+                                const id = String(deal.ID || deal.id);
+                                const rem = remainingMD[id];
+                                if (rem === undefined || rem <= 0) continue;
+                                const extra = Math.min(rem, remCap);
+                                occupiedSum += extra;
+                                remainingMD[id] = Math.max(0, rem - extra);
+                                remCap -= extra;
+                            }
+                        }
+
+                        this.dynamicRawDemandCache[dateStr] = rawDemandSum;
+                        this.occupancyCache[dateStr] = occupiedSum;
+                        cur.add(1, 'day');
+                    }
+
+                    this.cacheValid = true;
+                },
 
     // Пакетный расчет для диапазона дат
     async preCalculateOccupancyForRange(startDate, endDate) {
-        const dates = [];
+        this.occupancyCache = {};
+        this.dynamicRawDemandCache = {};
+        this.availableManDaysCache = {};
+        this.cacheValid = false;
+        this.runDynamicLoadSimulation(startDate, endDate);
+        const results = [];
         const current = moment(startDate);
         const end = moment(endDate);
-        
         while (current.isSameOrBefore(end)) {
             const dateStr = current.format('YYYY-MM-DD');
-            if (!this.isWeekend(dateStr)) {
-                dates.push(dateStr);
-            }
+            results.push({
+                date: dateStr,
+                occupied: this.occupancyCache[dateStr] ?? 0,
+                available: this.availableManDaysCache[dateStr] ?? this.getAvailableManDays(dateStr),
+            });
             current.add(1, 'day');
         }
-
-        // Параллельный расчет для всех дат
-        const calculationPromises = dates.map(date => 
-            this.getOccupiedManDays(date).then(occupied => ({
-                date,
-                occupied,
-                available: this.getAvailableManDays(date)
-            }))
-        );
-
-        const results = await Promise.all(calculationPromises);
-        
-        // Сохраняем результаты в кэш
-        results.forEach(result => {
-            this.occupancyCache[result.date] = result.occupied;
-            this.availableManDaysCache[result.date] = result.available;
-        });
-
-        this.cacheValid = true;
         return results;
     },
 
@@ -1759,59 +1770,35 @@ getCellContent(employee, date) {
                     // Если статус не указан, используем календарь: в рабочие дни доступен, в выходные - нет
                     return !this.isWeekend(date);
                 },
-                // Метод для расчета занятых человеко-дней на конкретную дату
-async getOccupiedManDays(date) {
-
-    let totalLoad = 0;
-    const currentMoment = moment(date);
-    const availableManDays = this.getAvailableManDays(date);
-    
-    // Проходим по всем сделкам
-    for (const deal of this.deals) {
-        const dealStart = moment(deal.UF_CRM_1755511210978).subtract(1, 'day');
-        const dealEnd = moment(deal.UF_CRM_1755511228885);
-        // Если дата попадает в период сделки
-        if (currentMoment.isBetween(dealStart, dealEnd, null, '[]')) {
-            // Считаем РАБОЧИЕ дни в периоде сделки (исключая нерабочие)
-            const workDaysInDeal = this.countWorkDaysInPeriod(dealStart, dealEnd) - 1;
-            if (workDaysInDeal > 0) {
-                // Рассчитываем дневную нагрузку для этой сделки
-                const dailyLoad = deal.UF_CRM_1755511268203 / workDaysInDeal;
-                // Проверяем, не превысит ли добавление этой нагрузки доступную емкость
-                if (totalLoad + dailyLoad > availableManDays) {
-                    // Если превышает, ограничиваем нагрузку доступной емкостью
-                    totalLoad = availableManDays;
-                    break; // Дальнейшие сделки не могут добавить нагрузку
-                } else {
-                    totalLoad += dailyLoad;
-                }
-            }
-        }
-    }
-    
-    // Гарантируем, что занятость не превышает доступную емкость
-    return Math.min(totalLoad, availableManDays);
-},
-/**
- * Суммарная потребность в ЧД по всем сделкам на дату без ограничения емкостью дня.
- * Нужна для обнаружения перегруза: getOccupiedManDays всегда возвращает min(нагрузка, available),
- * поэтому при перегрузке available === occupied и условие occupied > available никогда не срабатывает.
- */
-getRawOccupiedManDays(date) {
-    let totalLoad = 0;
-    const currentMoment = moment(date);
-    for (const deal of this.deals) {
-        const dealStart = moment(deal.UF_CRM_1755511210978).subtract(1, 'day');
-        const dealEnd = moment(deal.UF_CRM_1755511228885);
-        if (currentMoment.isBetween(dealStart, dealEnd, null, '[]')) {
-            const workDaysInDeal = this.countWorkDaysInPeriod(dealStart, dealEnd) - 1;
-            if (workDaysInDeal > 0) {
-                totalLoad += deal.UF_CRM_1755511268203 / workDaysInDeal;
-            }
-        }
-    }
-    return totalLoad;
-},
+                /**
+                 * Суммарная потребность в ЧД по всем сделкам на дату без ограничения емкостью дня.
+                 * Нужна для обнаружения перегруза и как основа для «занято» на графике.
+                 */
+                getRawOccupiedManDays(date) {
+                    const dateStr = moment(date).format('YYYY-MM-DD');
+                    if (this.isWeekend(dateStr)) return 0;
+                    if (this.cacheValid && this.dynamicRawDemandCache[dateStr] !== undefined) {
+                        return this.dynamicRawDemandCache[dateStr];
+                    }
+                    let totalLoad = 0;
+                    for (const deal of this.deals) {
+                        if (!this.isDealActiveOnDate(deal, dateStr)) continue;
+                        const workDaysInDeal = this.getDealWorkDaysCount(deal);
+                        if (workDaysInDeal <= 0) continue;
+                        totalLoad += deal.UF_CRM_1755511268203 / workDaysInDeal;
+                    }
+                    return totalLoad;
+                },
+                /** Занятые ЧД: из динамической симуляции (остаток/оставшиеся дни + приоритет по короткому периоду), иначе min(статическая потребность, ёмкость). */
+                async getOccupiedManDays(date) {
+                    const dateStr = moment(date).format('YYYY-MM-DD');
+                    if (this.cacheValid && this.occupancyCache[dateStr] !== undefined) {
+                        return this.occupancyCache[dateStr];
+                    }
+                    const raw = this.getRawOccupiedManDays(dateStr);
+                    const availableManDays = this.getAvailableManDays(dateStr);
+                    return Math.min(raw, availableManDays);
+                },
 async addDealWithRedistribution() {
     if (!this.canAddDeal) return;
 
@@ -1952,7 +1939,7 @@ async checkDealWithRedistribution() {
             
             // Используем кэшированные данные
             const available = this.getAvailableManDays(dateStr);
-            const occupied = this.occupancyCache[dateStr] || 0;
+            const occupied = this.occupancyCache[dateStr] ?? 0;
             const free = Math.max(0, available - occupied);
             
             dailyCapacityData.push({
@@ -2164,11 +2151,10 @@ async getFreeManDays(date) {
 
 // Метод для получения перегрузки (если занятость превышает доступность)
 async getOverload(date) {
-    const available = this.getAvailableManDays(date);
-    const occupied = await this.getOccupiedManDays(date);
-    
-    // Перегруженность (положительное значение означает превышение лимита)
-    return Math.max(0, occupied - available);
+    const dateStr = moment(date).format('YYYY-MM-DD');
+    const available = this.getAvailableManDays(dateStr);
+    const raw = this.getRawOccupiedManDays(dateStr);
+    return Math.max(0, raw - available);
 },
                 // Метод для подсчета рабочих дней в периоде (исключая выходные)
                 countWorkDaysInPeriod(start, end) {
@@ -2191,7 +2177,8 @@ async getOverload(date) {
 
                 // Метод для получения доступных человеко-дней на дату
                 getAvailableManDays(date) {
-                    const dateMoment = moment(date);
+                    const dateStr = moment(date).format('YYYY-MM-DD');
+                    const dateMoment = moment(dateStr);
                     // Считаем количество сотрудников, доступных для работы в эту дату
                     const availableCount = this.employees.filter(emp => {
                         if (emp.created_at && moment(emp.created_at).isAfter(dateMoment, 'day')) {
@@ -2202,7 +2189,7 @@ async getOverload(date) {
                             return false;
                         }
 
-                        const status = emp.schedule[date];
+                        const status = emp.schedule[dateStr];
                         
                         // Если статус явно указан как рабочий день - сотрудник доступен (даже в выходной)
                         if (status === 'working') return true;
@@ -2212,7 +2199,7 @@ async getOverload(date) {
                         
                         // Если статус не указан, проверяем является ли день выходным по календарю
                         // В выходные по умолчанию сотрудник недоступен
-                        return !this.isWeekend(date);
+                        return !this.isWeekend(dateStr);
                     }).length;
                     
                     // Гарантируем, что доступное количество не будет отрицательным
@@ -2316,24 +2303,29 @@ async updateChart() {
         const availableData = [];
         const occupiedData = [];
         const freeData = [];
+        const rawDemandByIndex = [];
 
         const allDates = [];
         for (let m = moment(startDate); m.isSameOrBefore(endDate); m.add(1, 'days')) {
             allDates.push(m.format('YYYY-MM-DD'));
         }
-
-        // Теперь данные берутся из кэша - очень быстро
+        // Точки графика: сырая потребность и доступно из кэша; занято — из динамической симуляции при валидном кэше
         for (const dateStr of allDates) {
             const m = moment(dateStr);
             categories.push(m.format('DD.MM.YY'));
-            
+
             const available = this.getAvailableManDays(dateStr);
-            const occupied = this.occupancyCache[dateStr] || 0;
+            const rawDemand = this.getRawOccupiedManDays(dateStr);
+            const occupied =
+                this.cacheValid && this.occupancyCache[dateStr] !== undefined
+                    ? this.occupancyCache[dateStr]
+                    : Math.min(rawDemand, available);
             const free = Math.max(0, available - occupied);
-            
+
             availableData.push(available);
             occupiedData.push(occupied);
             freeData.push(free);
+            rawDemandByIndex.push(rawDemand);
         }
 
         // Остальная часть метода updateChart без изменений
@@ -2452,6 +2444,13 @@ async updateChart() {
                     s += '<br/><span style="color:' + point.color + '">\u25CF</span> ' + 
                         point.series.name + ': ' + point.y.toFixed(1);
                 });
+                const rawD = rawDemandByIndex[pointIndex];
+                if (rawD !== undefined) {
+                    const avail = availableData[pointIndex];
+                    if (rawD > avail + 0.05) {
+                        s += '<br/><span style="color:#ff9800">\u25CF</span> Перегруз: потребность ' + rawD.toFixed(1) + ' ЧД при ёмкости ' + avail.toFixed(1) + ' ЧД';
+                    }
+                }
                 return s;
             }
         },
@@ -2780,16 +2779,34 @@ async normalizeWorkload() {
                         this.loading = false;
                     }
                 },
+                /** ID сделки из placement (вкладка в карточке); иначе null */
+                getPlacementDealId() {
+                    try {
+                        if (typeof BX24 !== 'undefined' && BX24.placement && typeof BX24.placement.info === 'function') {
+                            const info = BX24.placement.info();
+                            const id = info && info.options && info.options.ID;
+                            if (id != null && id !== '') return String(id);
+                        }
+                    } catch (e) { /* не в контексте placement */ }
+                    return null;
+                },
+                /** Дневная нагрузка сделки (ЧД/рабочий день периода) */
+                getDealDailyManDayLoad(deal) {
+                    const workDaysInDeal = this.getDealWorkDaysCount(deal);
+                    if (workDaysInDeal <= 0) return 0;
+                    return deal.UF_CRM_1755511268203 / workDaysInDeal;
+                },
 async redistributeOverload() {
     this.loading = true;
     try {
+        const placementDealId = this.getPlacementDealId();
         const startDate = moment();
         const endDate = moment().add(14, 'months');
-        const maxIterations = 10; // Максимальное количество итераций для цикличного перераспределения
+        const maxIterations = 3; // Максимальное количество итераций для цикличного перераспределения
         let iteration = 0;
         let hasOverload = true;
         
-        console.log('=== Начинаем цикличное перераспределение перегрузок ===');
+        console.log('=== Начинаем цикличное перераспределение перегрузок ===', placementDealId ? `(только сделка ${placementDealId})` : '(все сделки на перегруженном дне)');
         
         // Цикл продолжается пока есть перегрузки и не превышен лимит итераций
         while (hasOverload && iteration < maxIterations) {
@@ -2829,38 +2846,62 @@ async redistributeOverload() {
                 currentDate.add(1, 'day');
             }
             
-            // Если перегрузок нет - выходим из цикла
-            if (overloadedDays.length === 0) {
+            // Сортируем по дате (от ранних к поздним)
+            overloadedDays.sort((a, b) => a.dateObj - b.dateObj);
+
+            // В режиме карточки сделки обрабатываем только дни, где участвует текущая сделка (остальные учтены в расчёте ЧД, но не перераспределяем)
+            const overloadedDaysToProcess = placementDealId
+                ? overloadedDays.filter(od =>
+                    this.deals.some(deal => {
+                        if (String(deal.ID || deal.id) !== placementDealId) return false;
+                        return this.isDealActiveOnDate(deal, od.date);
+                    })
+                  )
+                : overloadedDays;
+
+            if (overloadedDaysToProcess.length === 0) {
                 hasOverload = false;
-                console.log(`Перегрузок больше нет. Завершаем на итерации ${iteration}`);
+                console.log(placementDealId
+                    ? `Перегрузок для текущей сделки больше нет. Завершаем на итерации ${iteration}`
+                    : `Перегрузок больше нет. Завершаем на итерации ${iteration}`);
                 break;
             }
             
-            // Сортируем по дате (от ранних к поздним)
-            overloadedDays.sort((a, b) => a.dateObj - b.dateObj);
+            console.log(`Найдено ${overloadedDaysToProcess.length} дней с перегрузкой на итерации ${iteration}${placementDealId ? ' (только дни текущей сделки)' : ''}`);
             
-            console.log(`Найдено ${overloadedDays.length} дней с перегрузкой на итерации ${iteration}`);
-            
-            // Обрабатываем каждый перегруженный день
-            for (const overloadedDay of overloadedDays) {
+            for (const overloadedDay of overloadedDaysToProcess) {
                 console.log(`Обработка перегрузки ${overloadedDay.overload.toFixed(1)} ЧД на ${overloadedDay.date}`);
                 
                 // Находим сделки, которые создают нагрузку в этот день
-                const dealsOnDay = this.deals.filter(deal => {
-                    const dealStart = moment(deal.UF_CRM_1755511210978).subtract(1, 'day');
-                    const dealEnd = moment(deal.UF_CRM_1755511228885);
-                    return overloadedDay.dateObj.isBetween(dealStart, dealEnd, null, '[]');
-                });
+                const dealsOnDay = this.deals.filter(deal =>
+                    this.isDealActiveOnDate(deal, overloadedDay.date)
+                );
                 
                 if (dealsOnDay.length === 0) {
                     console.log(`На дате ${overloadedDay.date} нет сделок`);
                     continue;
                 }
-                
-                // Рассчитываем общую перегрузку для всех сделок на этом дне
-                const totalOverload = overloadedDay.overload;
-                
-                console.log(`Общая перегрузка на день ${overloadedDay.date}: ${totalOverload.toFixed(2)} ЧД, количество сделок: ${dealsOnDay.length}`);
+
+                let dealsToExtend = dealsOnDay;
+                let totalOverload = overloadedDay.overload;
+
+                if (placementDealId) {
+                    const targetDeal = dealsOnDay.find(d => String(d.ID || d.id) === placementDealId);
+                    if (!targetDeal) {
+                        console.log(`День ${overloadedDay.date}: перегруз без текущей сделки — пропуск (чужие сделки не меняем)`);
+                        continue;
+                    }
+                    dealsToExtend = [targetDeal];
+                    const targetDaily = this.getDealDailyManDayLoad(targetDeal);
+                    totalOverload = Math.min(overloadedDay.overload, targetDaily);
+                    console.log(`Общая перегрузка на день ${overloadedDay.date}: ${overloadedDay.overload.toFixed(2)} ЧД; переносим только долю текущей сделки: ${totalOverload.toFixed(2)} ЧД (дневная нагрузка сделки ${targetDaily.toFixed(2)} ЧД)`);
+                    if (totalOverload <= 0) {
+                        console.log(`Пропуск: нечего переносить по текущей сделке на ${overloadedDay.date}`);
+                        continue;
+                    }
+                } else {
+                    console.log(`Общая перегрузка на день ${overloadedDay.date}: ${totalOverload.toFixed(2)} ЧД, количество сделок: ${dealsOnDay.length}`);
+                }
                 
                 // Начинаем искать место со следующего дня после перегруженного дня
                 let searchDate = overloadedDay.dateObj.clone().add(1, 'day');
@@ -2911,16 +2952,14 @@ async redistributeOverload() {
                     searchDate.add(1, 'day');
                 }
                 
-                // Теперь продлеваем все сделки на одинаковое количество дней
+                // Продлеваем только выбранные сделки (в режиме placement — одну текущую)
                 if (totalDaysExtended > 0) {
-                    // Нашли достаточно дней, продлеваем все сделки
                     const newEndDate = searchDate.clone().subtract(1, 'day'); // Возвращаемся на последний рабочий день
                     const newEndDateStr = newEndDate.format('YYYY-MM-DD');
                     
-                    console.log(`Продлеваем ${dealsOnDay.length} сделок на ${totalDaysExtended} дней до ${newEndDateStr}`);
+                    console.log(`Продлеваем ${dealsToExtend.length} сделок на ${totalDaysExtended} дней до ${newEndDateStr}`);
                     
-                    // Продлеваем каждую сделку
-                    for (const deal of dealsOnDay) {
+                    for (const deal of dealsToExtend) {
                         const dealId = deal.ID || deal.id;
                         const dealEnd = moment(deal.UF_CRM_1755511228885);
                         
@@ -2965,7 +3004,9 @@ async redistributeOverload() {
         await this.loadDeals();
         await this.updateChart();
         
-        this.showSuccess(`Перегрузки автоматически распределены (итераций: ${iteration})`);
+        this.showSuccess(placementDealId
+            ? `Перегрузка по текущей сделке распределена (итераций: ${iteration})`
+            : `Перегрузки автоматически распределены (итераций: ${iteration})`);
         
     } catch (error) {
         console.error('Ошибка при распределении перегрузки:', error);
