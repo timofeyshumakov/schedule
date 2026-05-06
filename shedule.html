@@ -779,7 +779,64 @@
                     return this.countWorkDaysInPeriod(start, end);
                 },
 
+                /** Есть ли в диапазоне рабочий день, где суммарная равномерная норма (ЧД/раб.дни по сделке) превышает ёмкость */
+                hasUniformOverloadInRange(rangeStartStr, rangeEndStr) {
+                    let cur = moment(rangeStartStr).startOf('day');
+                    const re = moment(rangeEndStr).startOf('day');
+                    while (cur.isSameOrBefore(re, 'day')) {
+                        const dateStr = cur.format('YYYY-MM-DD');
+                        if (this.isWeekend(dateStr)) {
+                            cur.add(1, 'day');
+                            continue;
+                        }
+                        const avail = this.getAvailableManDays(dateStr);
+                        let raw = 0;
+                        for (const deal of this.deals) {
+                            if (!this.isDealActiveOnDate(deal, dateStr)) continue;
+                            const W = this.getDealWorkDaysCount(deal);
+                            if (W <= 0) continue;
+                            raw += deal.UF_CRM_1755511268203 / W;
+                        }
+                        if (raw > avail + 1e-6) return true;
+                        cur.add(1, 'day');
+                    }
+                    return false;
+                },
+
                 /**
+                 * Равномерное распределение по датам сделки в CRM: на каждый рабочий день MD/W,
+                 * занято на графике = min(сумма норм, доступно). Без динамики остатков.
+                 */
+                runUniformLoadSimulation(rangeStartStr, rangeEndStr) {
+                    const rs = moment(rangeStartStr).startOf('day');
+                    const re = moment(rangeEndStr).startOf('day');
+                    let cur = rs.clone();
+                    while (cur.isSameOrBefore(re, 'day')) {
+                        const dateStr = cur.format('YYYY-MM-DD');
+                        const available = this.getAvailableManDays(dateStr);
+                        this.availableManDaysCache[dateStr] = available;
+                        if (this.isWeekend(dateStr)) {
+                            this.occupancyCache[dateStr] = 0;
+                            this.dynamicRawDemandCache[dateStr] = 0;
+                        } else {
+                            let raw = 0;
+                            for (const deal of this.deals) {
+                                if (!this.isDealActiveOnDate(deal, dateStr)) continue;
+                                const W = this.getDealWorkDaysCount(deal);
+                                if (W <= 0) continue;
+                                raw += deal.UF_CRM_1755511268203 / W;
+                            }
+                            this.dynamicRawDemandCache[dateStr] = raw;
+                            this.occupancyCache[dateStr] = Math.min(raw, available);
+                        }
+                        cur.add(1, 'day');
+                    }
+                    this.cacheValid = true;
+                },
+
+                /**
+                 * Динамическое распределение — только если равномерное (MD/раб.дни по датам сделки)
+                 * на каком‑то дне диапазона не помещается в ёмкость (см. hasUniformOverloadInRange).
                  * Распределение ЧД по дням: приоритет у сделок с меньшим числом рабочих дней в периоде.
                  * На день D: базовая ставка = остаток_ЧД / оставшиеся_рабочие_дни до конца сделки.
                  * Проход 1 — короткие сделки первыми получают min(ставка, оставшаяся ёмкость).
@@ -872,7 +929,11 @@
         this.dynamicRawDemandCache = {};
         this.availableManDaysCache = {};
         this.cacheValid = false;
-        this.runDynamicLoadSimulation(startDate, endDate);
+        if (this.hasUniformOverloadInRange(startDate, endDate)) {
+            this.runDynamicLoadSimulation(startDate, endDate);
+        } else {
+            this.runUniformLoadSimulation(startDate, endDate);
+        }
         const results = [];
         const current = moment(startDate);
         const end = moment(endDate);
@@ -2903,71 +2964,73 @@ async redistributeOverload() {
                     console.log(`Общая перегрузка на день ${overloadedDay.date}: ${totalOverload.toFixed(2)} ЧД, количество сделок: ${dealsOnDay.length}`);
                 }
                 
-                // Начинаем искать место со следующего дня после перегруженного дня
+                // Сначала — слоты внутри текущих сроков (до самого раннего дня окончания среди продлеваемых сделок), затем при необходимости — за предел срока (продление).
                 let searchDate = overloadedDay.dateObj.clone().add(1, 'day');
                 let remainingOverload = totalOverload;
                 let totalDaysExtended = 0;
-                const maxExtension = 180; // Максимальное расширение в днях
-                
-                console.log(`Ищем место для ${remainingOverload.toFixed(2)} ЧД начиная с ${searchDate.format('YYYY-MM-DD')}`);
-                
-                // Накапливаем перераспределение на следующих днях пока не распределим всю перегрузку
-                // Заполняем каждый день до 100% мощности перед переходом к следующему
-                while (remainingOverload > 0 && totalDaysExtended < maxExtension) {
+                const maxExtension = 180;
+                let minDealEnd = null;
+                for (const d of dealsToExtend) {
+                    const e = moment(d.UF_CRM_1755511228885).startOf('day');
+                    if (!minDealEnd || e.isBefore(minDealEnd, 'day')) minDealEnd = e.clone();
+                }
+
+                const absorbOneDay = async () => {
                     const searchDateStr = searchDate.format('YYYY-MM-DD');
-                    
-                    // Пропускаем выходные
                     if (!this.isWeekend(searchDateStr)) {
                         const available = this.getAvailableManDays(searchDateStr);
-                        
-                        // Всегда используем значение из кэша (которое накапливается в течение итерации)
-                        // Если в кэше нет значения, получаем из базы
                         let occupied = this.occupancyCache[searchDateStr];
-                        
                         if (occupied === undefined) {
                             occupied = await this.getOccupiedManDays(searchDateStr);
                             this.occupancyCache[searchDateStr] = occupied;
                         }
-                        
-                        // Свободное место до полной мощности дня
                         const freeSpace = Math.max(0, available - occupied);
-                        
                         if (freeSpace > 0) {
-                            // Сколько можем поместить в этот день
                             const canFit = Math.min(remainingOverload, freeSpace);
-                            console.log(`  День ${searchDateStr}: вместимость (100%) = ${available.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД, свободно = ${freeSpace.toFixed(1)} ЧД, помещаем = ${canFit.toFixed(2)} ЧД`);
-                            
+                            console.log(`  День ${searchDateStr}: вместимость = ${available.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД, свободно = ${freeSpace.toFixed(1)} ЧД, помещаем = ${canFit.toFixed(2)} ЧД`);
                             remainingOverload -= canFit;
                             totalDaysExtended++;
-                            
-                            // Накапливаем занятость в кэше (добавляем к существующему значению)
                             this.occupancyCache[searchDateStr] = occupied + canFit;
-                            console.log(`  Обновленная занятость дня ${searchDateStr}: ${this.occupancyCache[searchDateStr].toFixed(1)} ЧД`);
+                            console.log(`  Обновлённая занятость ${searchDateStr}: ${this.occupancyCache[searchDateStr].toFixed(1)} ЧД`);
                         } else {
-                            // Нет свободного места до 100%, переходим к следующему дню
-                            console.log(`  День ${searchDateStr}: нет свободного места до 100% мощности (свободно = ${freeSpace.toFixed(1)} ЧД, занято = ${occupied.toFixed(1)} ЧД)`);
+                            console.log(`  День ${searchDateStr}: нет свободного места (свободно = ${freeSpace.toFixed(1)} ЧД)`);
                         }
                     }
-                    
                     searchDate.add(1, 'day');
+                };
+
+                console.log(`Ищем место для ${remainingOverload.toFixed(2)} ЧД начиная с ${searchDate.format('YYYY-MM-DD')}; фаза 1 — внутри сроков до ${minDealEnd ? minDealEnd.format('YYYY-MM-DD') : '—'}`);
+
+                let phase1Steps = 0;
+                while (remainingOverload > 0 && minDealEnd && searchDate.isSameOrBefore(minDealEnd, 'day') && phase1Steps < maxExtension) {
+                    await absorbOneDay();
+                    phase1Steps++;
                 }
-                
-                // Продлеваем только выбранные сделки (в режиме placement — одну текущую)
+
+                let phase2Steps = 0;
+                while (remainingOverload > 0 && phase2Steps < maxExtension) {
+                    await absorbOneDay();
+                    phase2Steps++;
+                }
+
                 if (totalDaysExtended > 0) {
-                    const newEndDate = searchDate.clone().subtract(1, 'day'); // Возвращаемся на последний рабочий день
-                    const newEndDateStr = newEndDate.format('YYYY-MM-DD');
-                    
-                    console.log(`Продлеваем ${dealsToExtend.length} сделок на ${totalDaysExtended} дней до ${newEndDateStr}`);
-                    
+                    const proposedEnd = searchDate.clone().subtract(1, 'day').startOf('day');
+                    console.log(`Перераспределение: предлагаемая дата окончания (по поиску) ${proposedEnd.format('YYYY-MM-DD')}, шагов с поглощением ${totalDaysExtended}`);
+
                     for (const deal of dealsToExtend) {
                         const dealId = deal.ID || deal.id;
-                        const dealEnd = moment(deal.UF_CRM_1755511228885);
-                        
-                        console.log(`Сделка ${dealId}: продлеваем с ${dealEnd.format('YYYY-MM-DD')} до ${newEndDateStr} (добавлено ${totalDaysExtended} дней)`);
-                        
+                        const dealEnd = moment(deal.UF_CRM_1755511228885).startOf('day');
+                        const newEndMoment = moment.max(dealEnd, proposedEnd);
+                        if (!newEndMoment.isAfter(dealEnd, 'day')) {
+                            console.log(`Сделка ${dealId}: дата окончания ${dealEnd.format('YYYY-MM-DD')} не сдвигается (перегруз размещён внутри срока)`);
+                            continue;
+                        }
+                        const newEndDateStr = newEndMoment.format('YYYY-MM-DD');
+                        console.log(`Сделка ${dealId}: продление с ${dealEnd.format('YYYY-MM-DD')} до ${newEndDateStr} (рабочих дней в периоде не уменьшаем)`);
+
                         await new Promise((resolve) => {
                             BX24.callMethod(
-                                "crm.deal.update",
+                                'crm.deal.update',
                                 {
                                     id: dealId,
                                     fields: {
