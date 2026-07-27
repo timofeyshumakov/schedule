@@ -55,9 +55,11 @@
             border-radius: 4px;
             overflow: hidden;
         }
-        #loadChart{
-            overflow-x: scroll !important;
-            overflow-y: hidden !important;
+        #loadChart {
+            overflow: hidden !important;
+        }
+        .chart-container {
+            overflow: hidden;
         }
         .main-table thead {
             background-color: #1976D2;
@@ -120,6 +122,11 @@
 
         .main-table tbody tr:nth-child(even):hover {
             background-color: rgba(25, 118, 210, 0.04);
+        }
+        .main-table tfoot .available-summary td {
+            background-color: #e3f2fd;
+            font-weight: 600;
+            text-align: center;
         }
 
         @media (max-width: 600px) {
@@ -256,7 +263,7 @@
                                 <v-card>
                                     <v-card-title>График загрузки</v-card-title>
                                     <v-card-text>
-                                        <div class="chart-container" id="chartContainer" @wheel="handleChartWheel">
+                                        <div class="chart-container" id="chartContainer">
                                                 <div id="loadChart"></div>
                                         </div>
                                     </v-card-text>
@@ -357,6 +364,17 @@
                                                         </template>
                                                     </tr>
                                                 </tbody>
+                                                <tfoot>
+                                                    <tr class="available-summary">
+                                                        <td><strong>Доступно ЧД</strong></td>
+                                                        <td v-for="date in tableDates"
+                                                            :key="'avail-' + date"
+                                                            class="load-cell"
+                                                            :class="{ weekend: isWeekend(date) }">
+                                                            {{ getAvailableManDays(date) }}
+                                                        </td>
+                                                    </tr>
+                                                </tfoot>
                                             </table>
                                         </div>
                                     </v-card-text>
@@ -622,9 +640,16 @@
     <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/locale/ru.js"></script>
     <script src="//api.bitrix24.com/api/v1/"></script>
     <script type="module">
+        import {
+            API_BASE,
+            BITRIX24_WEBHOOK,
+            CRM_FIELDS,
+            APP_CONFIG,
+            ISDAYOFF_API_URL,
+            buildDealCalcFields,
+        } from './constants.js?v=20260714-2';
+
         moment.locale('ru');
-        //import { callApi } from "./src/functions/callApi";
-        const API_BASE =  "https://5648299-ej74484.twc1.net/shedule/api"; //'http://localhost/shedule/api';
         new Vue({
             el: '#app',
             vuetify: new Vuetify({
@@ -728,6 +753,7 @@
                     availableManDaysCache: {}, // Кэш для доступных человеко-дней
                     lastDealsUpdate: null, // Время последнего обновления сделок
                     cacheValid: false, // Флаг валидности кэша
+                    _scheduleRangeLoaded: null, // Диапазон загруженного расписания { start, end }
                 };
             },
             computed: {
@@ -762,8 +788,8 @@
                 /** Границы периода сделки по полям CRM (включительно по дням) */
                 dealPeriodBounds(deal) {
                     return {
-                        start: moment(deal.UF_CRM_1755511210978).startOf('day'),
-                        end: moment(deal.UF_CRM_1755511228885).startOf('day'),
+                        start: moment(deal[CRM_FIELDS.DEAL_START]).startOf('day'),
+                        end: moment(deal[CRM_FIELDS.DEAL_END]).startOf('day'),
                     };
                 },
                 isDealActiveOnDate(deal, dateStr) {
@@ -777,6 +803,30 @@
                     const { start, end } = this.dealPeriodBounds(deal);
                     if (!start.isValid() || !end.isValid() || end.isBefore(start)) return 0;
                     return this.countWorkDaysInPeriod(start, end);
+                },
+                /** Всего дней в периоде сделки (для равномерного деления ЧД на каждый день диапазона) */
+                getDealCalendarDaysCount(deal) {
+                    const { start, end } = this.dealPeriodBounds(deal);
+                    if (!start.isValid() || !end.isValid() || end.isBefore(start)) return 0;
+                    return end.diff(start, 'days') + 1;
+                },
+                /** Округление человеко-дней до 0.1 */
+                roundManDays(value) {
+                    const decimals = APP_CONFIG.MAN_DAYS_DECIMALS ?? 1;
+                    const factor = Math.pow(10, decimals);
+                    return Math.round(Number(value) * factor) / factor;
+                },
+                /** Равномерная дневная нагрузка: ЧД сделки / рабочие дни периода, округление до 0.1 */
+                getUniformDailyManDayLoad(manDays, workDaysCount) {
+                    if (workDaysCount <= 0) return 0;
+                    return this.roundManDays(manDays / workDaysCount);
+                },
+                /** Дневная нагрузка сделки (ЧД/календарный день периода) с округлением до 0.1 */
+                getDealDailyManDayLoad(deal) {
+                    return this.getUniformDailyManDayLoad(
+                        deal[CRM_FIELDS.DEAL_MAN_DAYS],
+                        this.getDealCalendarDaysCount(deal)
+                    );
                 },
 
                 /** Есть ли в диапазоне рабочий день, где суммарная равномерная норма (ЧД/раб.дни по сделке) превышает ёмкость */
@@ -793,9 +843,9 @@
                         let raw = 0;
                         for (const deal of this.deals) {
                             if (!this.isDealActiveOnDate(deal, dateStr)) continue;
-                            const W = this.getDealWorkDaysCount(deal);
+                            const W = this.getDealCalendarDaysCount(deal);
                             if (W <= 0) continue;
-                            raw += deal.UF_CRM_1755511268203 / W;
+                            raw += this.getDealDailyManDayLoad(deal);
                         }
                         if (raw > avail + 1e-6) return true;
                         cur.add(1, 'day');
@@ -804,7 +854,7 @@
                 },
 
                 /**
-                 * Равномерное распределение по датам сделки в CRM: на каждый рабочий день MD/W,
+                 * Равномерное распределение по датам сделки в CRM: на каждый день MD/W,
                  * занято на графике = min(сумма норм, доступно). Без динамики остатков.
                  */
                 runUniformLoadSimulation(rangeStartStr, rangeEndStr) {
@@ -815,20 +865,17 @@
                         const dateStr = cur.format('YYYY-MM-DD');
                         const available = this.getAvailableManDays(dateStr);
                         this.availableManDaysCache[dateStr] = available;
-                        if (this.isWeekend(dateStr)) {
-                            this.occupancyCache[dateStr] = 0;
-                            this.dynamicRawDemandCache[dateStr] = 0;
-                        } else {
-                            let raw = 0;
-                            for (const deal of this.deals) {
-                                if (!this.isDealActiveOnDate(deal, dateStr)) continue;
-                                const W = this.getDealWorkDaysCount(deal);
-                                if (W <= 0) continue;
-                                raw += deal.UF_CRM_1755511268203 / W;
-                            }
-                            this.dynamicRawDemandCache[dateStr] = raw;
-                            this.occupancyCache[dateStr] = Math.min(raw, available);
+                        
+                        let raw = 0;
+                        for (const deal of this.deals) {
+                            if (!this.isDealActiveOnDate(deal, dateStr)) continue;
+                            const W = this.getDealCalendarDaysCount(deal);
+                            if (W <= 0) continue;
+                            raw += this.getDealDailyManDayLoad(deal);
                         }
+                        this.dynamicRawDemandCache[dateStr] = raw;
+                        this.occupancyCache[dateStr] = Math.min(raw, available);
+                        
                         cur.add(1, 'day');
                     }
                     this.cacheValid = true;
@@ -856,7 +903,7 @@
                         if (W <= 0) continue;
                         const effStart = moment.max(start, rs);
                         const remW = this.countWorkDaysInPeriod(effStart, end);
-                        remainingMD[id] = deal.UF_CRM_1755511268203 * (remW / W);
+                        remainingMD[id] = deal[CRM_FIELDS.DEAL_MAN_DAYS] * (remW / W);
                     }
 
                     let cur = rs.clone();
@@ -995,7 +1042,7 @@ async loadProductionCalendarForYear(year) {
             return;
         }
 
-        const response = await fetch(`https://isdayoff.ru/api/getdata?year=${year}&delimeter=,`);
+        const response = await fetch(`${ISDAYOFF_API_URL}?year=${year}&delimeter=,`);
         const csvData = await response.text();
         
         const calendar = [];
@@ -1188,69 +1235,82 @@ createDefaultCalendar(year) {
     this.productionCalendars[year] = calendar;
     this.productionCalendar = calendar;
 },
- async callApi(method, filter, select, entityTypeId, batchNumber, parsed) {
-    let total = 0;
-    const maxTotal = 50;
-    let data = [];
-    const params = {
-        filter: filter ? filter : null,
-        select: select ? select : null,
-        entityTypeId: entityTypeId ? entityTypeId : null,
-        id: method === "crm.dealcategory.stage.list" ? entityTypeId : null,
-        start: 0,
-    };
-
-    const exceptions = ["crm.status.list"];
-
-    await new Promise((resolve) => {
-        BX24.callMethod(method, params, (res) => {
-            if (res.data()) {
-                total = res.total();
-                data = res.data();
-                parsed += total;
-                resolve(data);
-            }
+ async isBitrixSdkAvailable() {
+    return typeof BX24 !== 'undefined' && typeof BX24.callMethod === 'function';
+},
+isBitrixWebhookConfigured() {
+    return typeof BITRIX24_WEBHOOK === 'string' && BITRIX24_WEBHOOK.trim().length > 0;
+},
+async bitrixCall(method, params = {}) {
+    if (await this.isBitrixSdkAvailable()) {
+        return await new Promise((resolve, reject) => {
+            BX24.callMethod(method, params, (res) => {
+                if (res.error()) {
+                    reject(new Error(res.error()));
+                    return;
+                }
+                resolve(res.data());
+            });
         });
+    }
+
+    if (!this.isBitrixWebhookConfigured()) {
+        throw new Error('BX24 недоступен и вебхук Bitrix24 не настроен (BITRIX24_WEBHOOK)');
+    }
+
+    const base = BITRIX24_WEBHOOK.replace(/\/$/, '');
+    const response = await fetch(`${base}/${method}.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
     });
 
-    if (total > maxTotal && !exceptions.includes(method)) {
-        let cmd = {};
-        const iterations = Math.min(Math.ceil((total - 0 * 2500) / maxTotal), 50);
-        let resultData = [];
-        for (let i = 0; i < iterations; i++) {
-            const key = `cmd${i}`;
-            const value = {
-                method: method,
-                params: {
-                    filter: filter || null,
-                    select: select || null,
-                    entityTypeId: entityTypeId || null,
-                    id: method === "crm.dealcategory.stage.list" ? entityTypeId : null,
-                    start: (0 * 2500) + i * maxTotal,
-                }
-            };
-            cmd[key] = value;
-            if ((i + 1) % maxTotal === 0 || i + 1 === iterations) {
-                const batchLength = (i + 1) % maxTotal === 0 ? maxTotal : iterations % maxTotal;
-                await new Promise((resolve) => {
-                    BX24.callBatch(cmd, (res) => {
-                        for (let r = i - batchLength + 1; r < i + 1; r++) {
-                            const key = `cmd${r}`;
-                            const data = res[key].data();
-                            const data2 = data.items ? data.items : data;
-                            resultData.push(data2);
-                        }
-                        resultData = resultData.flat();
-                        data = resultData;
-                        cmd = {};
-                        resolve();
-                    });
-                });
-                break;
-            }
-        }
+    if (!response.ok) {
+        throw new Error(`Bitrix webhook HTTP ${response.status}`);
     }
-    return data.items ? data.items : data;
+
+    const json = await response.json();
+    if (json.error) {
+        throw new Error(json.error_description || json.error);
+    }
+
+    return json.result;
+},
+async bitrixUpdateDeal(dealId, fields) {
+    return this.bitrixCall('crm.deal.update', { id: dealId, fields });
+},
+async bitrixAddDealComment(dealId, comment) {
+    return this.bitrixCall('crm.timeline.comment.add', {
+        fields: {
+            ENTITY_ID: String(dealId),
+            ENTITY_TYPE: 'deal',
+            COMMENT: comment,
+        },
+    });
+},
+async callApi(method, filter, select, entityTypeId) {
+    const pageSize = APP_CONFIG.BITRIX_PAGE_SIZE;
+    const params = {
+        filter: filter || undefined,
+        select: select || undefined,
+        entityTypeId: entityTypeId || undefined,
+        id: method === 'crm.dealcategory.stage.list' ? entityTypeId : undefined,
+    };
+
+    let allData = [];
+    let start = 0;
+
+    while (true) {
+        const result = await this.bitrixCall(method, { ...params, start });
+        const chunk = Array.isArray(result) ? result : (result && result.items ? result.items : (result ? [result] : []));
+        allData = allData.concat(chunk);
+
+        if (chunk.length < pageSize) break;
+        start += pageSize;
+        if (start > 5000) break;
+    }
+
+    return allData;
 },
                 // API методы
                 async apiCall(url, options = {}) {
@@ -1300,10 +1360,10 @@ createDefaultCalendar(year) {
                 async loadDeals() {
                     try {
                         this.deals = await this.callApi("crm.deal.list", 
-                            {"!UF_CRM_1755511210978": "null", 
-                            ">UF_CRM_1755511228885": moment().subtract(1, 'month').format('DD.MM.YYYY'), 
-                            "!UF_CRM_1755511268203": "null"}, 
-                            ["ID", "UF_CRM_1755511210978", "UF_CRM_1755511228885", "UF_CRM_1755511268203"]);
+                            {[`!${CRM_FIELDS.DEAL_START}`]: "null", 
+                            [`>${CRM_FIELDS.DEAL_END}`]: moment().subtract(APP_CONFIG.DEAL_LIST_MONTHS_BACK, 'month').format('DD.MM.YYYY'), 
+                            [`!${CRM_FIELDS.DEAL_MAN_DAYS}`]: "null"}, 
+                            ["ID", CRM_FIELDS.DEAL_START, CRM_FIELDS.DEAL_END, CRM_FIELDS.DEAL_MAN_DAYS]);
                         
                         // Инвалидируем кэш при загрузке новых сделок
                         this.invalidateCache();
@@ -1312,20 +1372,32 @@ createDefaultCalendar(year) {
                     }
                 },
 
-                async loadSchedule() {
-                    if (!this.tableDateStart || !this.tableDateEnd) return;
-                    
+                async loadScheduleForRange(startDate, endDate, merge = true) {
+                    if (!startDate || !endDate) return;
+
+                    const start = moment(startDate).format('YYYY-MM-DD');
+                    const end = moment(endDate).format('YYYY-MM-DD');
+
                     try {
                         const data = await this.apiCall(
-                            `${API_BASE}/schedule.php?start_date=${this.tableDateStart}&end_date=${this.tableDateEnd}`
+                            `${API_BASE}/schedule.php?start_date=${start}&end_date=${end}`
                         );
-                        
-                        // Очищаем расписания
-                        this.employees.forEach(emp => {
-                            emp.schedule = {};
-                        });
-                        
-                        // Заполняем расписания из данных API
+
+                        if (!merge) {
+                            this.employees.forEach(emp => {
+                                emp.schedule = {};
+                            });
+                        } else {
+                            this.employees.forEach(emp => {
+                                let cur = moment(start);
+                                const endMoment = moment(end);
+                                while (cur.isSameOrBefore(endMoment, 'day')) {
+                                    delete emp.schedule[cur.format('YYYY-MM-DD')];
+                                    cur.add(1, 'day');
+                                }
+                            });
+                        }
+
                         data.data.forEach(item => {
                             const employee = this.employees.find(e => e.name === item.name);
                             if (employee && item.date) {
@@ -1335,6 +1407,51 @@ createDefaultCalendar(year) {
                     } catch (error) {
                         this.showError('Ошибка загрузки графика: ' + error.message);
                     }
+                },
+                async ensureScheduleForRange(startDate, endDate) {
+                    const start = moment(startDate).format('YYYY-MM-DD');
+                    const end = moment(endDate).format('YYYY-MM-DD');
+
+                    if (!this._scheduleRangeLoaded) {
+                        await this.loadScheduleForRange(start, end, false);
+                        this._scheduleRangeLoaded = { start, end };
+                        return;
+                    }
+
+                    const loadedStart = moment(this._scheduleRangeLoaded.start);
+                    const loadedEnd = moment(this._scheduleRangeLoaded.end);
+                    const needStart = moment(start).isBefore(loadedStart, 'day');
+                    const needEnd = moment(end).isAfter(loadedEnd, 'day');
+
+                    if (!needStart && !needEnd) return;
+
+                    const loadStart = needStart
+                        ? moment.min(moment(start), loadedStart).format('YYYY-MM-DD')
+                        : this._scheduleRangeLoaded.start;
+                    const loadEnd = needEnd
+                        ? moment.max(moment(end), loadedEnd).format('YYYY-MM-DD')
+                        : this._scheduleRangeLoaded.end;
+
+                    await this.loadScheduleForRange(loadStart, loadEnd, true);
+                    this._scheduleRangeLoaded = { start: loadStart, end: loadEnd };
+                },
+                async ensureProductionCalendarsForRange(startDate, endDate) {
+                    const years = new Set();
+                    let cur = moment(startDate).startOf('day');
+                    const end = moment(endDate).startOf('day');
+                    while (cur.isSameOrBefore(end, 'day')) {
+                        years.add(cur.year());
+                        cur.add(1, 'day');
+                    }
+                    await Promise.all([...years].map(year => this.loadProductionCalendarForYear(year)));
+                },
+                async loadSchedule() {
+                    if (!this.tableDateStart || !this.tableDateEnd) return;
+                    await this.loadScheduleForRange(this.tableDateStart, this.tableDateEnd, false);
+                    this._scheduleRangeLoaded = {
+                        start: this.tableDateStart,
+                        end: this.tableDateEnd,
+                    };
                 },
 
                 async refreshData() {
@@ -1423,6 +1540,10 @@ createDefaultCalendar(year) {
                         // Обновляем локальные данные
                         this.currentEmployee.schedule[this.currentDate] = this.selectedStatus;
                         this.iconDialog = false;
+                        this.invalidateCache();
+                        if (this.currentView === 'planning') {
+                            await this.updateChart();
+                        }
                         this.showSuccess('Статус обновлен');
                     } catch (error) {
                         this.showError('Ошибка сохранения статуса: ' + error.message);
@@ -1767,7 +1888,7 @@ getCellContent(employee, date) {
                             this.newDeal.manDays / totalAvailableMinusOccupied : 0;
                         
                         // Проверяем условие: коэффициент загрузки должен быть ≤ 0.9 (90%)
-                        if (capacityRatio <= 0.9) {
+                        if (capacityRatio <= APP_CONFIG.CAPACITY_RATIO_LIMIT) {
                             this.dealCheckResult = `Можно добавить сделку. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableMinusOccupied.toFixed(1)} свободных ЧД)`;
                             await new Promise((resolve) => {
                                     BX24.callMethod(
@@ -1819,17 +1940,41 @@ getCellContent(employee, date) {
                         this.checkingDeal = false;
                     } */
                 },
-                isEmployeeAvailable(employee, date) {
-                    const status = employee.schedule[date];
-                    
-                    // Если статус явно указан как рабочий день - сотрудник доступен (даже в выходной)
+                isEmployeeAvailableForWork(employee, date) {
+                    const dateStr = moment(date).format('YYYY-MM-DD');
+                    const dateMoment = moment(dateStr);
+
+                    if (employee.created_at && moment(employee.created_at).isAfter(dateMoment, 'day')) {
+                        return false;
+                    }
+                    if (employee.termination_date && moment(employee.termination_date).isBefore(dateMoment, 'day')) {
+                        return false;
+                    }
+
+                    const status = employee.schedule[dateStr];
                     if (status === 'working') return true;
-                    
-                    // Если статус указан как нерабочий - сотрудник недоступен
-                    if (status === 'vacation' || status === 'sick' || status === 'weekend') return false;
-                    
-                    // Если статус не указан, используем календарь: в рабочие дни доступен, в выходные - нет
-                    return !this.isWeekend(date);
+                    if (status === 'vacation' || status === 'sick' || status === 'weekend' || status === 'terminated' || status === 'not_hired') {
+                        return false;
+                    }
+                    return !this.isWeekend(dateStr);
+                },
+                verifyPersonnelChartConsistency(dates) {
+                    const mismatches = [];
+                    for (const dateStr of dates) {
+                        const chartCount = this.getAvailableManDays(dateStr);
+                        const tableCount = this.employees.filter(emp =>
+                            this.isEmployeeAvailableForWork(emp, dateStr)
+                        ).length;
+                        if (chartCount !== tableCount) {
+                            mismatches.push({ date: dateStr, chartCount, tableCount });
+                        }
+                    }
+                    if (mismatches.length) {
+                        console.warn('Несоответствие ЧД график/таблица:', mismatches);
+                    } else if (dates.length) {
+                        console.log(`Проверка ЧД: график и таблица совпадают для ${dates.length} дат`);
+                    }
+                    return mismatches;
                 },
                 /**
                  * Суммарная потребность в ЧД по всем сделкам на дату без ограничения емкостью дня.
@@ -1837,16 +1982,15 @@ getCellContent(employee, date) {
                  */
                 getRawOccupiedManDays(date) {
                     const dateStr = moment(date).format('YYYY-MM-DD');
-                    if (this.isWeekend(dateStr)) return 0;
                     if (this.cacheValid && this.dynamicRawDemandCache[dateStr] !== undefined) {
                         return this.dynamicRawDemandCache[dateStr];
                     }
                     let totalLoad = 0;
                     for (const deal of this.deals) {
                         if (!this.isDealActiveOnDate(deal, dateStr)) continue;
-                        const workDaysInDeal = this.getDealWorkDaysCount(deal);
+                        const workDaysInDeal = this.getDealCalendarDaysCount(deal);
                         if (workDaysInDeal <= 0) continue;
-                        totalLoad += deal.UF_CRM_1755511268203 / workDaysInDeal;
+                        totalLoad += this.getDealDailyManDayLoad(deal);
                     }
                     return totalLoad;
                 },
@@ -1898,8 +2042,8 @@ async addDealWithRedistribution() {
 // Метод для оптимизации распределения нагрузки между сделками
 async optimizeWorkloadDistribution() {
     try {
-        const startDate = moment().subtract(1, 'month'); // Начинаем с месяца назад
-        const endDate = moment().add(3, 'months'); // Планируем на 3 месяца вперед
+        const startDate = moment().subtract(APP_CONFIG.CHART_MONTHS_LOOKBACK, 'month'); // Начинаем с месяца назад
+        const endDate = moment().add(APP_CONFIG.OPTIMIZATION_MONTHS_AHEAD, 'months'); // Планируем вперёд
         
         const optimizationPeriod = [];
         let currentDate = startDate.clone();
@@ -1975,15 +2119,15 @@ async checkDealWithRedistribution() {
         const start = moment(this.newDeal.startDate);
         const end = moment(this.newDeal.endDate);
         
-        const workDaysInDeal = this.countWorkDaysInPeriod(start, end);
+        const calendarDaysInDeal = end.diff(start, 'days') + 1;
         
-        if (workDaysInDeal === 0) {
-            this.dealCheckResult = 'В выбранном периоде нет рабочих дней';
+        if (calendarDaysInDeal === 0) {
+            this.dealCheckResult = 'В выбранном периоде нет дней';
             this.canAddDeal = false;
             return;
         }
 
-        const requiredDailyLoad = this.newDeal.manDays / workDaysInDeal;
+        const requiredDailyLoad = this.getUniformDailyManDayLoad(this.newDeal.manDays, calendarDaysInDeal);
         
         let totalAvailableCapacity = 0;
         let dailyCapacityData = [];
@@ -2030,27 +2174,13 @@ async checkDealWithRedistribution() {
             this.newDeal.manDays / totalAvailableCapacity : 0;
         
         if (problemDates.length === 0) {
-            if (capacityRatio <= 0.9) {
+            if (capacityRatio <= APP_CONFIG.CAPACITY_RATIO_LIMIT) {
                 this.dealCheckResult = `Можно добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableCapacity.toFixed(1)} свободных ЧД)`;
-                await new Promise((resolve) => {
-                    BX24.callMethod(
-                        "crm.deal.update",
-                        {
-                            id: BX24.placement.info().options.ID,
-                            fields: {
-                                UF_CRM_1751532386933: this.newDeal.startDate,
-                                UF_CRM_1751532395170: this.newDeal.endDate,
-                                UF_CRM_1751532404575: this.newDeal.manDays,
-                            },
-                        },
-                        function(result) {
-                            if (result.error()) {
-                                console.error('Ошибка обновления сделки:', result.error())
-                            }
-                            resolve()
-                        }
-                    )
-                });
+                await this.updateCurrentDealFields(buildDealCalcFields(
+                    this.newDeal.startDate,
+                    this.newDeal.endDate,
+                    this.newDeal.manDays
+                ));
                 this.canAddDeal = true;
             } else {
                 this.dealCheckResult = `Нельзя добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Коэффициент загрузки ${(capacityRatio * 100).toFixed(1)}% превышает допустимые 90%. Требуется ${this.newDeal.manDays} ЧД, доступно ${totalAvailableCapacity.toFixed(1)} свободных ЧД`;
@@ -2083,40 +2213,24 @@ async checkDealWithRedistribution() {
 
             if (remainingLoad <= 0) {
                 this.dealCheckResult = `Можно добавить сделку на даты ${this.newDeal.startDate} / ${this.newDeal.endDate}. Коэффициент загрузки: ${(capacityRatio * 100).toFixed(1)}% (${this.newDeal.manDays} ЧД / ${totalAvailableCapacity.toFixed(1)} свободных ЧД)`;
-                await new Promise((resolve) => {
-                    BX24.callMethod(
-                        "crm.deal.update",
-                        {
-                            id: BX24.placement.info().options.ID,
-                            fields: {
-                                UF_CRM_1751532386933: this.newDeal.startDate,
-                                UF_CRM_1751532395170: this.newDeal.endDate,
-                                UF_CRM_1751532404575: this.newDeal.manDays,
-                            },
-                        },
-                        function(result) {
-                            if (result.error()) {
-                                console.error('Ошибка обновления сделки:', result.error())
-                            }
-                            resolve()
-                        }
-                    )
-                });
+                await this.updateCurrentDealFields(buildDealCalcFields(
+                    this.newDeal.startDate,
+                    this.newDeal.endDate,
+                    this.newDeal.manDays
+                ));
                 this.canAddDeal = true;
             } else {
                 // Расширение периода за счет следующих дней
                 let extendedEnd = end.clone();
-                let extendedWorkDays = workDaysInDeal;
-                const maxExtensions = 90; // Максимальное расширение в днях
+                let extendedCalendarDays = calendarDaysInDeal;
+                const maxExtensions = APP_CONFIG.MAX_DEAL_EXTENSION_DAYS;
                 let extensions = 0;
                 let fitted = false;
 
                 while (true) {
                     extendedEnd.add(1, 'day');
                     const extendedDateStr = extendedEnd.format('YYYY-MM-DD');
-                    if (!this.isWeekend(extendedDateStr)) {
-                        extendedWorkDays += 1;
-                    }
+                    extendedCalendarDays += 1;
                     extensions += 1;
 
                     if (extensions > maxExtensions) {
@@ -2125,7 +2239,7 @@ async checkDealWithRedistribution() {
                         break;
                     }
 
-                    const newDailyLoad = this.newDeal.manDays / extendedWorkDays;
+                    const newDailyLoad = this.getUniformDailyManDayLoad(this.newDeal.manDays, extendedCalendarDays);
 
                     let fits = true;
                     let current = start.clone();
@@ -2143,27 +2257,22 @@ async checkDealWithRedistribution() {
 
                     if (fits) {
                         this.newDeal.endDate = extendedDateStr;
+                        let extendedCapacity = 0;
+                        let currentExt = start.clone();
+                        while (currentExt.isSameOrBefore(extendedEnd)) {
+                            const dStr = currentExt.format('YYYY-MM-DD');
+                            if (!this.isWeekend(dStr)) {
+                                extendedCapacity += await this.getFreeManDays(dStr);
+                            }
+                            currentExt.add(1, 'day');
+                        }
                         const newCapacityRatio = extendedCapacity > 0 ? this.newDeal.manDays / extendedCapacity : 0;
                         this.dealCheckResult = `Сделка будет добавлена с расширением периода до ${this.newDeal.endDate} из-за нехватки ресурсов. Новый коэффициент загрузки: ${(newCapacityRatio * 100).toFixed(1)}%`;
-                        await new Promise((resolve) => {
-                            BX24.callMethod(
-                                "crm.deal.update",
-                                {
-                                    id: BX24.placement.info().options.ID,
-                                    fields: {
-                                        UF_CRM_1751532386933: this.newDeal.startDate,
-                                        UF_CRM_1751532395170: this.newDeal.endDate,
-                                        UF_CRM_1751532404575: this.newDeal.manDays,
-                                    },
-                                },
-                                function(result) {
-                                    if (result.error()) {
-                                        console.error('Ошибка обновления сделки:', result.error())
-                                    }
-                                    resolve()
-                                }
-                            )
-                        });
+                        await this.updateCurrentDealFields(buildDealCalcFields(
+                            this.newDeal.startDate,
+                            this.newDeal.endDate,
+                            this.newDeal.manDays
+                        ));
                         this.canAddDeal = true;
                         fitted = true;
                         break;
@@ -2176,24 +2285,7 @@ async checkDealWithRedistribution() {
             }
         }
         
-        await new Promise((resolve) => {
-            BX24.callMethod(
-                "crm.timeline.comment.add",
-                {
-                    fields: {
-                        ENTITY_ID: BX24.placement.info().options.ID,
-                        ENTITY_TYPE: "deal",
-                        COMMENT: this.dealCheckResult,
-                    }
-                },
-                function(result) {
-                    if (result.error()) {
-                        console.error('Ошибка добавления комментария:', result.error())
-                    }
-                    resolve()
-                }
-            )
-        });
+        await this.addCurrentDealComment(this.dealCheckResult);
                                    
     } catch (error) {
         this.showError('Ошибка проверки сделки: ' + error.message);
@@ -2239,31 +2331,9 @@ async getOverload(date) {
                 // Метод для получения доступных человеко-дней на дату
                 getAvailableManDays(date) {
                     const dateStr = moment(date).format('YYYY-MM-DD');
-                    const dateMoment = moment(dateStr);
-                    // Считаем количество сотрудников, доступных для работы в эту дату
-                    const availableCount = this.employees.filter(emp => {
-                        if (emp.created_at && moment(emp.created_at).isAfter(dateMoment, 'day')) {
-                            return false; // Сотрудник еще не был принят
-                        }
-
-                        if (emp.termination_date && moment(emp.termination_date).isBefore(dateMoment, 'day')) {
-                            return false;
-                        }
-
-                        const status = emp.schedule[dateStr];
-                        
-                        // Если статус явно указан как рабочий день - сотрудник доступен (даже в выходной)
-                        if (status === 'working') return true;
-                        
-                        // Если статус указан как нерабочий (отпуск, больничный, выходной) - сотрудник недоступен
-                        if (status === 'vacation' || status === 'sick' || status === 'weekend' || status === 'terminated' || status === 'not_hired') return false;
-                        
-                        // Если статус не указан, проверяем является ли день выходным по календарю
-                        // В выходные по умолчанию сотрудник недоступен
-                        return !this.isWeekend(dateStr);
-                    }).length;
-                    
-                    // Гарантируем, что доступное количество не будет отрицательным
+                    const availableCount = this.employees.filter(emp =>
+                        this.isEmployeeAvailableForWork(emp, dateStr)
+                    ).length;
                     return Math.max(0, availableCount);
                 },
 
@@ -2323,42 +2393,59 @@ async getOverload(date) {
                     if (percentage >= 70) return 'Средняя загрузка';
                     return 'Низкая загрузка';
                 },
-                handleChartWheel(e) {
+                attachChartWheelPan(chart, categories) {
                     const chartContainer = document.getElementById('chartContainer');
-                    if (!chartContainer) return;
-                    
-                    // Получаем текущую позицию скролла и размеры
-                    const currentScrollLeft = chartContainer.scrollLeft;
-                    const scrollWidth = chartContainer.scrollWidth;
-                    const clientWidth = chartContainer.clientWidth;
-                    
-                    // Рассчитываем максимально возможную позицию скролла
-                    const maxScrollLeft = scrollWidth - clientWidth;
+                    if (!chartContainer || !chart) return;
 
-                    // Определяем направление скролла
-                    const scrollDelta = e.deltaY;
-                    
-                    // Проверяем границы
-                    if ((scrollDelta > 0 && currentScrollLeft <= 0) || // Достигли начала
-                        (scrollDelta < 0 && currentScrollLeft >= maxScrollLeft)) { // Достигли конца
-                        e.preventDefault();
-                        return;
+                    if (this._chartWheelHandler) {
+                        chartContainer.removeEventListener('wheel', this._chartWheelHandler);
                     }
-                    
-                    // Если не достигли границ, выполняем скролл
-                    chartContainer.scrollLeft += scrollDelta;
-                    e.preventDefault();
+
+                    const scrollSpeed = APP_CONFIG.CHART_SCROLL_SPEED;
+                    this._chartWheelHandler = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+                        if (!delta) return;
+
+                        const xAxis = chart.xAxis[0];
+                        const extremes = xAxis.getExtremes();
+                        const range = extremes.max - extremes.min;
+                        const step = delta > 0 ? scrollSpeed : -scrollSpeed;
+
+                        let newMin = extremes.min + step;
+                        let newMax = extremes.max + step;
+
+                        if (newMin < 0) {
+                            newMin = 0;
+                            newMax = range;
+                        }
+                        if (newMax >= categories.length - 1) {
+                            newMax = categories.length - 1;
+                            newMin = Math.max(0, newMax - range);
+                        }
+
+                        xAxis.setExtremes(newMin, newMax, true, false);
+                    };
+
+                    chartContainer.addEventListener('wheel', this._chartWheelHandler, { passive: false });
                 },
                 // Обновление графика загрузки
 async updateChart() {
     const currentYear = moment().year();
         const nextYear = currentYear + 1;
         
-        const startDate = moment("2025-08-01");
-        const endDate = moment().endOf('year').add(1, 'year');
+        const startDate = moment().subtract(APP_CONFIG.CHART_MONTHS_LOOKBACK, 'month').startOf('day');
+        const endDate = moment().endOf('year').add(APP_CONFIG.CHART_YEARS_AHEAD, 'year');
+        const startStr = startDate.format('YYYY-MM-DD');
+        const endStr = endDate.format('YYYY-MM-DD');
+
+        await this.ensureProductionCalendarsForRange(startStr, endStr);
+        await this.ensureScheduleForRange(startStr, endStr);
         
         // Предварительно вычисляем данные для всего периода
-        await this.preCalculateOccupancyForRange(startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD'));
+        await this.preCalculateOccupancyForRange(startStr, endStr);
 
         const categories = [];
         const availableData = [];
@@ -2389,7 +2476,12 @@ async updateChart() {
             rawDemandByIndex.push(rawDemand);
         }
 
-        // Остальная часть метода updateChart без изменений
+        const tableOverlapDates = this.tableDates.filter(d =>
+            moment(d).isBetween(startDate, endDate, 'day', '[]')
+        );
+        this.verifyPersonnelChartConsistency(tableOverlapDates.length ? tableOverlapDates : allDates.slice(0, 14));
+
+        const vm = this;
         Highcharts.chart('loadChart', {
         lang: {
             contextButtonTitle: "Контекстное меню",
@@ -2435,35 +2527,7 @@ async updateChart() {
                     const endIndex = Math.min(categories.length - 1, todayIndex + 30);
                     
                     chart.xAxis[0].setExtremes(startIndex, endIndex);
-                    
-                    // Добавляем кастомный скролл
-                    chart.container.onwheel = function(e) {
-                        e.preventDefault();
-                        
-                        const delta = e.deltaY || e.deltaX;
-                        const scrollSpeed = 3; // Скорость скролла
-                        
-                        const xAxis = chart.xAxis[0];
-                        const extremes = xAxis.getExtremes();
-                        const range = extremes.max - extremes.min;
-                        
-                        // Рассчитываем новый диапазон
-                        let newMin = extremes.min + (delta > 0 ? scrollSpeed : -scrollSpeed);
-                        let newMax = extremes.max + (delta > 0 ? scrollSpeed : -scrollSpeed);
-                        
-                        // Проверяем границы
-                        if (newMin < 0) {
-                            newMin = 0;
-                            newMax = range;
-                        }
-                        if (newMax >= categories.length) {
-                            newMax = categories.length - 1;
-                            newMin = newMax - range;
-                        }
-                        
-                        // Применяем новый диапазон
-                        xAxis.setExtremes(newMin, newMax, true, false);
-                    };
+                    vm.attachChartWheelPan(chart, categories);
                 }
             }
         },
@@ -2535,6 +2599,11 @@ async updateChart() {
             }
         },
         series: [{
+            name: 'Доступные ЧД',
+            data: availableData,
+            color: '#36a2eb',
+            lineWidth: 2
+        }, {
             name: 'Занятые ЧД',
             data: occupiedData,
             color: '#ff6384',
@@ -2666,8 +2735,8 @@ async getLoadSummary(startDate, endDate) {
 },
 async normalizeWorkload() {
     try {
-        const startDate = moment().subtract(1, 'month');
-        const endDate = moment().add(3, 'months');
+        const startDate = moment().subtract(APP_CONFIG.CHART_MONTHS_LOOKBACK, 'month');
+        const endDate = moment().add(APP_CONFIG.OPTIMIZATION_MONTHS_AHEAD, 'months');
         
         const daysToNormalize = [];
         let currentDate = startDate.clone();
@@ -2755,7 +2824,7 @@ async normalizeWorkload() {
                 async loadProductionCalendar() {
                     this.loadingCalendar = true;
                     try {
-                        const response = await fetch(`https://isdayoff.ru/api/getdata?year=${this.currentYear}&delimeter=,`);
+                        const response = await fetch(`${ISDAYOFF_API_URL}?year=${this.currentYear}&delimeter=,`);
                         const csvData = await response.text();
                         
                         this.productionCalendar = [];
@@ -2851,23 +2920,46 @@ async normalizeWorkload() {
                     } catch (e) { /* не в контексте placement */ }
                     return null;
                 },
-                /** Дневная нагрузка сделки (ЧД/рабочий день периода) */
-                getDealDailyManDayLoad(deal) {
-                    const workDaysInDeal = this.getDealWorkDaysCount(deal);
-                    if (workDaysInDeal <= 0) return 0;
-                    return deal.UF_CRM_1755511268203 / workDaysInDeal;
+                async updateCurrentDealFields(fields) {
+                    const dealId = this.getPlacementDealId();
+                    if (!dealId) {
+                        console.warn('ID текущей сделки не определён');
+                        return false;
+                    }
+                    try {
+                        await this.bitrixUpdateDeal(dealId, fields);
+                        return true;
+                    } catch (error) {
+                        console.error('Ошибка обновления сделки:', error);
+                        return false;
+                    }
+                },
+                async addCurrentDealComment(comment) {
+                    const dealId = this.getPlacementDealId();
+                    if (!dealId) return false;
+                    try {
+                        await this.bitrixAddDealComment(dealId, comment);
+                        return true;
+                    } catch (error) {
+                        console.error('Ошибка добавления комментария:', error);
+                        return false;
+                    }
                 },
 async redistributeOverload() {
     this.loading = true;
     try {
         const placementDealId = this.getPlacementDealId();
+        if (!placementDealId) {
+            console.warn('Перераспределение перегрузки пропущено: не удалось определить текущую сделку');
+            return;
+        }
         const startDate = moment();
-        const endDate = moment().add(14, 'months');
-        const maxIterations = 3; // Максимальное количество итераций для цикличного перераспределения
+        const endDate = moment().add(APP_CONFIG.OVERLOAD_MONTHS_AHEAD, 'months');
+        const maxIterations = APP_CONFIG.REDISTRIBUTE_MAX_ITERATIONS;
         let iteration = 0;
         let hasOverload = true;
         
-        console.log('=== Начинаем цикличное перераспределение перегрузок ===', placementDealId ? `(только сделка ${placementDealId})` : '(все сделки на перегруженном дне)');
+        console.log('=== Начинаем цикличное перераспределение перегрузок ===', `(только сделка ${placementDealId})`);
         
         // Цикл продолжается пока есть перегрузки и не превышен лимит итераций
         while (hasOverload && iteration < maxIterations) {
@@ -2910,31 +3002,28 @@ async redistributeOverload() {
             // Сортируем по дате (от ранних к поздним)
             overloadedDays.sort((a, b) => a.dateObj - b.dateObj);
 
-            // В режиме карточки сделки обрабатываем только дни, где участвует текущая сделка (остальные учтены в расчёте ЧД, но не перераспределяем)
-            const overloadedDaysToProcess = placementDealId
-                ? overloadedDays.filter(od =>
-                    this.deals.some(deal => {
-                        if (String(deal.ID || deal.id) !== placementDealId) return false;
-                        return this.isDealActiveOnDate(deal, od.date);
-                    })
-                  )
-                : overloadedDays;
+            // Обрабатываем только дни, где участвует текущая сделка (остальные учтены в расчёте ЧД, но не перераспределяем)
+            const overloadedDaysToProcess = overloadedDays.filter(od =>
+                this.deals.some(deal => {
+                    if (String(deal.ID || deal.id) !== placementDealId) return false;
+                    return this.isDealActiveOnDate(deal, od.date);
+                })
+            );
 
             if (overloadedDaysToProcess.length === 0) {
                 hasOverload = false;
-                console.log(placementDealId
-                    ? `Перегрузок для текущей сделки больше нет. Завершаем на итерации ${iteration}`
-                    : `Перегрузок больше нет. Завершаем на итерации ${iteration}`);
+                console.log(`Перегрузок для текущей сделки больше нет. Завершаем на итерации ${iteration}`);
                 break;
             }
             
-            console.log(`Найдено ${overloadedDaysToProcess.length} дней с перегрузкой на итерации ${iteration}${placementDealId ? ' (только дни текущей сделки)' : ''}`);
+            console.log(`Найдено ${overloadedDaysToProcess.length} дней с перегрузкой на итерации ${iteration} (только дни текущей сделки)`);
             
             for (const overloadedDay of overloadedDaysToProcess) {
                 console.log(`Обработка перегрузки ${overloadedDay.overload.toFixed(1)} ЧД на ${overloadedDay.date}`);
                 
-                // Находим сделки, которые создают нагрузку в этот день
+                // Находим только текущую сделку, если она создает нагрузку в этот день
                 const dealsOnDay = this.deals.filter(deal =>
+                    String(deal.ID || deal.id) === placementDealId &&
                     this.isDealActiveOnDate(deal, overloadedDay.date)
                 );
                 
@@ -2943,35 +3032,24 @@ async redistributeOverload() {
                     continue;
                 }
 
-                let dealsToExtend = dealsOnDay;
-                let totalOverload = overloadedDay.overload;
-
-                if (placementDealId) {
-                    const targetDeal = dealsOnDay.find(d => String(d.ID || d.id) === placementDealId);
-                    if (!targetDeal) {
-                        console.log(`День ${overloadedDay.date}: перегруз без текущей сделки — пропуск (чужие сделки не меняем)`);
-                        continue;
-                    }
-                    dealsToExtend = [targetDeal];
-                    const targetDaily = this.getDealDailyManDayLoad(targetDeal);
-                    totalOverload = Math.min(overloadedDay.overload, targetDaily);
-                    console.log(`Общая перегрузка на день ${overloadedDay.date}: ${overloadedDay.overload.toFixed(2)} ЧД; переносим только долю текущей сделки: ${totalOverload.toFixed(2)} ЧД (дневная нагрузка сделки ${targetDaily.toFixed(2)} ЧД)`);
-                    if (totalOverload <= 0) {
-                        console.log(`Пропуск: нечего переносить по текущей сделке на ${overloadedDay.date}`);
-                        continue;
-                    }
-                } else {
-                    console.log(`Общая перегрузка на день ${overloadedDay.date}: ${totalOverload.toFixed(2)} ЧД, количество сделок: ${dealsOnDay.length}`);
+                const targetDeal = dealsOnDay[0];
+                const dealsToExtend = [targetDeal];
+                const targetDaily = this.getDealDailyManDayLoad(targetDeal);
+                const totalOverload = Math.min(overloadedDay.overload, targetDaily);
+                console.log(`Общая перегрузка на день ${overloadedDay.date}: ${overloadedDay.overload.toFixed(2)} ЧД; переносим только долю текущей сделки: ${totalOverload.toFixed(2)} ЧД (дневная нагрузка сделки ${targetDaily.toFixed(2)} ЧД)`);
+                if (totalOverload <= 0) {
+                    console.log(`Пропуск: нечего переносить по текущей сделке на ${overloadedDay.date}`);
+                    continue;
                 }
                 
                 // Сначала — слоты внутри текущих сроков (до самого раннего дня окончания среди продлеваемых сделок), затем при необходимости — за предел срока (продление).
                 let searchDate = overloadedDay.dateObj.clone().add(1, 'day');
                 let remainingOverload = totalOverload;
                 let totalDaysExtended = 0;
-                const maxExtension = 180;
+                const maxExtension = APP_CONFIG.REDISTRIBUTE_MAX_EXTENSION_DAYS;
                 let minDealEnd = null;
                 for (const d of dealsToExtend) {
-                    const e = moment(d.UF_CRM_1755511228885).startOf('day');
+                    const e = moment(d[CRM_FIELDS.DEAL_END]).startOf('day');
                     if (!minDealEnd || e.isBefore(minDealEnd, 'day')) minDealEnd = e.clone();
                 }
 
@@ -3019,35 +3097,37 @@ async redistributeOverload() {
 
                     for (const deal of dealsToExtend) {
                         const dealId = deal.ID || deal.id;
-                        const dealEnd = moment(deal.UF_CRM_1755511228885).startOf('day');
+                        const dealEnd = moment(deal[CRM_FIELDS.DEAL_END]).startOf('day');
                         const newEndMoment = moment.max(dealEnd, proposedEnd);
                         if (!newEndMoment.isAfter(dealEnd, 'day')) {
                             console.log(`Сделка ${dealId}: дата окончания ${dealEnd.format('YYYY-MM-DD')} не сдвигается (перегруз размещён внутри срока)`);
                             continue;
                         }
                         const newEndDateStr = newEndMoment.format('YYYY-MM-DD');
+                        const oldEndDateStr = dealEnd.format('YYYY-MM-DD');
                         console.log(`Сделка ${dealId}: продление с ${dealEnd.format('YYYY-MM-DD')} до ${newEndDateStr} (рабочих дней в периоде не уменьшаем)`);
 
-                        await new Promise((resolve) => {
-                            BX24.callMethod(
-                                'crm.deal.update',
-                                {
-                                    id: dealId,
-                                    fields: {
-                                        UF_CRM_1755511228885: newEndDateStr,
-                                    },
-                                },
-                                (result) => {
-                                    if (result.error()) {
-                                        console.error('Ошибка обновления сделки:', result.error());
-                                    } else {
-                                        deal.UF_CRM_1755511228885 = newEndDateStr;
-                                        console.log(`Сделка ${dealId} продлена до ${newEndDateStr}`);
-                                    }
-                                    resolve();
-                                }
-                            );
-                        });
+                        let dealUpdated = false;
+                        try {
+                            await this.bitrixUpdateDeal(dealId, {
+                                [CRM_FIELDS.DEAL_END]: newEndDateStr,
+                            });
+                            dealUpdated = true;
+                            deal[CRM_FIELDS.DEAL_END] = newEndDateStr;
+                            console.log(`Сделка ${dealId} продлена до ${newEndDateStr}`);
+                        } catch (error) {
+                            console.error('Ошибка обновления сделки:', error);
+                        }
+
+                        if (dealUpdated) {
+                            const commentText = `Перераспределение нагрузки: дата окончания изменена с ${oldEndDateStr} на ${newEndDateStr}.`;
+                            try {
+                                await this.bitrixAddDealComment(dealId, commentText);
+                                console.log(`Комментарий о перераспределении добавлен в сделку ${dealId}`);
+                            } catch (error) {
+                                console.error('Ошибка добавления комментария о перераспределении:', error);
+                            }
+                        }
                     }
                 } else {
                     console.log(`Не удалось найти место для перераспределения перегрузки`);
@@ -3067,9 +3147,7 @@ async redistributeOverload() {
         await this.loadDeals();
         await this.updateChart();
         
-        this.showSuccess(placementDealId
-            ? `Перегрузка по текущей сделке распределена (итераций: ${iteration})`
-            : `Перегрузки автоматически распределены (итераций: ${iteration})`);
+        this.showSuccess(`Перегрузка по текущей сделке распределена (итераций: ${iteration})`);
         
     } catch (error) {
         console.error('Ошибка при распределении перегрузки:', error);
@@ -3092,12 +3170,18 @@ async redistributeOverload() {
                         await new Promise(resolve => setTimeout(resolve, 200));
 
                         // 1. Получаем информацию о пользователе
-                        const userId = await new Promise((resolve) => {
-                            BX24.callMethod("user.current", {}, (res) => {
-                                resolve(res.data().ID);
-                            });
-                        });
-                        this.isAdmin = userId == 21 || BX24.isAdmin();
+                        if (await this.isBitrixSdkAvailable() || this.isBitrixWebhookConfigured()) {
+                            try {
+                                const user = await this.bitrixCall('user.current');
+                                const isWebhookAdmin = user.IS_ADMIN === 'Y' || user.IS_ADMIN === true;
+                                this.isAdmin = user.ID == APP_CONFIG.ADMIN_USER_ID
+                                    || (await this.isBitrixSdkAvailable() && typeof BX24.isAdmin === 'function' && BX24.isAdmin())
+                                    || isWebhookAdmin;
+                            } catch (userError) {
+                                console.warn('Не удалось определить пользователя Bitrix24:', userError);
+                                this.isAdmin = false;
+                            }
+                        }
                         
                         // 2. Показываем индикатор загрузки
                         this.loading = true;
