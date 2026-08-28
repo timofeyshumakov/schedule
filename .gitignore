@@ -1,0 +1,13 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/temp_build/
+*.log
+.DS_Store
+_extracted*
+_parts_*
+_build_store.mjs
+_fix_state*.mjs
+*.sqlite-journal

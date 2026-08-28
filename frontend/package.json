@@ -1,0 +1,28 @@
+{
+  "name": "shedule-test",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@mdi/font": "^7.4.47",
+    "highcharts": "^11.4.8",
+    "moment": "^2.29.4",
+    "pinia": "^2.2.2",
+    "sass": "^1.78.0",
+    "vue": "^3.4.37",
+    "vuetify": "^3.8.0-beta.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.2",
+    "vite": "^5.4.1",
+    "vite-plugin-vuetify": "^2.0.4",
+    "vitest": "^2.1.9"
+  }
+}
